@@ -1,0 +1,21 @@
+default_profile = "glm"
+
+# Replace model IDs with values available in `opencode models`.
+# "build" is built in. Use "worker" if you already configured that agent.
+[profiles.glm]
+engine = "opencode"
+model = "greenpt/glm-5.3"
+agent = "build"
+max_steps = 50
+
+[profiles.glm-flash]
+engine = "opencode"
+model = "greenpt/glm-5.3-flash"
+agent = "build"
+max_steps = 80
+
+[profiles.deepseek]
+engine = "opencode"
+model = "greenpt/deepseek-v4.1-flash"
+agent = "build"
+max_steps = 60

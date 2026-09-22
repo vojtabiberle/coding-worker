@@ -1,0 +1,4 @@
+/bin/
+.coding-worker.local.toml
+*.test
+coverage.out
