@@ -2,6 +2,8 @@
 
 Shared local implementation worker for Codex, Claude Code, and other MCP clients. OpenCode implements code; the calling orchestrator owns architecture, review, and acceptance. Switching worker models requires no MCP client changes.
 
+See [future version ideas](ROADMAP.md) for task-aware routing, remote execution, basic reviews, and repository check setup.
+
 ## Install
 
 Requires Linux or macOS, Go 1.26+, a C compiler for SQLite, Git, and OpenCode on PATH. Windows is not supported; use WSL. Build and install both executables:
