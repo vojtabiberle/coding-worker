@@ -43,7 +43,7 @@ func New(a *worker.App) *sdk.Server {
 			return response(v, e)
 		})
 	}
-	sdk.AddTool(s, &sdk.Tool{Name: "worker_record_review", Description: "Attach an external reviewer verdict and optional test/E2E/human outcomes to latest completed iteration."}, func(ctx context.Context, _ *sdk.CallToolRequest, in store.Review) (*sdk.CallToolResult, any, error) {
+	sdk.AddTool(s, &sdk.Tool{Name: "worker_record_review", Description: "Attach an external reviewer verdict and optional test/E2E/human outcomes to latest completed iteration. verdict must be accepted, changes_requested, or rejected. Use accepted for approval; approved is not supported."}, func(ctx context.Context, _ *sdk.CallToolRequest, in store.Review) (*sdk.CallToolResult, any, error) {
 		e := a.Review(in)
 		return response(map[string]bool{"recorded": e == nil}, e)
 	})

@@ -42,7 +42,7 @@ type Iteration struct {
 }
 type Review struct {
 	RunID             string `json:"run_id"`
-	Verdict           string `json:"verdict"`
+	Verdict           string `json:"verdict" jsonschema:"External review verdict: accepted, changes_requested, or rejected. Use accepted for approval, not approved."`
 	Blocker           int    `json:"blocker"`
 	Major             int    `json:"major"`
 	Minor             int    `json:"minor"`
@@ -207,7 +207,7 @@ func (s *Store) Event(id string, iteration int, kind string, data any) error {
 }
 func (s *Store) Review(v Review) error {
 	if v.Verdict != "accepted" && v.Verdict != "changes_requested" && v.Verdict != "rejected" {
-		return fmt.Errorf("invalid review verdict")
+		return fmt.Errorf("invalid review verdict %q: expected accepted, changes_requested, or rejected", v.Verdict)
 	}
 	if v.Blocker < 0 || v.Major < 0 || v.Minor < 0 || strings.TrimSpace(v.Reviewer) == "" {
 		return fmt.Errorf("reviewer required and counts must be nonnegative")

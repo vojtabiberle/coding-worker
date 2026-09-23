@@ -4,6 +4,8 @@ Shared local implementation worker for Codex, Claude Code, and other MCP clients
 
 See [future version ideas](ROADMAP.md) for task-aware routing, remote execution, basic reviews, and repository check setup.
 
+The optional [coding-worker skill](skills/coding-worker/SKILL.md) guides delegation, independent validation, correction rounds, and external acceptance. Install its folder into `~/.codex/skills/coding-worker/` and invoke it as `$coding-worker`. The MCP server remains usable without the skill.
+
 ## Install
 
 Requires Linux or macOS, Go 1.26+, a C compiler for SQLite, Git, and OpenCode on PATH. Windows is not supported; use WSL. Build and install both executables:
