@@ -1,6 +1,6 @@
 ---
 name: coding-worker
-description: Use coding-worker MCP for bounded implementation, repository exploration, diagnosis, verification, and code review, with independent validation and external acceptance. Use when the user requests coding-worker or OpenCode-backed delegation; not for developing or configuring the worker itself.
+description: Use coding-worker MCP for bounded implementation, repository exploration, diagnosis, verification, and code review, with independent validation and external acceptance. Use for repository tasks; not for developing or configuring the worker itself.
 ---
 
 # Coding worker orchestration
@@ -70,7 +70,7 @@ Worker reports and successful exit codes are evidence, not authoritative accepta
 
 ## Corrections and acceptance
 
-Record `changes_requested` when actionable findings remain, then call `worker_continue` with the same `run_id`, concrete feedback, and any additional acceptance criteria. Describe observed versus expected behavior and relevant locations; preserve the original scope. Continuation retains the original profile and OpenCode context.
+Record `changes_requested` when actionable findings remain, then call `worker_continue` with the same `run_id`, concrete feedback, and any additional acceptance criteria. Describe observed versus expected behavior and relevant locations; preserve the original scope. Continuation retains the original profile and worker session context.
 
 Continuation rejects repository drift. Review without editing where possible; validation can also modify generated or untracked files. If external changes prevent resumption, inspect the drift and start a new run with current context when appropriate. Never reset, delete, or revert user changes merely to satisfy the drift check.
 
