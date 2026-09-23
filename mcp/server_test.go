@@ -33,7 +33,7 @@ func TestProtocol(t *testing.T) {
 	}
 	defer cs.Close()
 	list, e := cs.ListTools(ctx, nil)
-	if e != nil || len(list.Tools) != 7 {
+	if e != nil || len(list.Tools) != 8 {
 		t.Fatal(list, e)
 	}
 	v, e := cs.CallTool(ctx, &sdk.CallToolParams{Name: "worker_implement", Arguments: map[string]any{"cwd": "relative", "objective": "test"}})
@@ -74,5 +74,19 @@ func TestDiagnosisSummaryBudget(t *testing.T) {
 	json.Unmarshal([]byte(b), &got)
 	if len(b) > 800 || got.Diagnosis == nil {
 		t.Fatalf("diagnosis lost from default summary: %s", b)
+	}
+}
+
+func TestVerifyTransportBudget(t *testing.T) {
+	for _, budget := range []int{512, 800, 8192} {
+		v := worker.VerifyResult{RunID: strings.Repeat("a", 32), State: "failed", Outcome: "start_failed", Fingerprint: strings.Repeat("b", 64), Freshness: "current", Excerpt: strings.Repeat("\\\"界", 10000)}
+		r, _, e := verifyResponse(v, fmt.Errorf("%s", strings.Repeat("failure", 1000)), budget)
+		if e != nil || !r.IsError || r.StructuredContent != nil {
+			t.Fatal(r, e)
+		}
+		body := r.Content[0].(*sdk.TextContent).Text
+		if len(body) > budget || !json.Valid([]byte(body)) {
+			t.Fatalf("budget exceeded: %d > %d", len(body), budget)
+		}
 	}
 }

@@ -78,8 +78,8 @@ func (a *App) reproductionLog(ctx context.Context, in ResultRequest) (any, error
 	if e != nil {
 		return nil, e
 	}
-	if r.Operation != "diagnose" || len(r.Iterations) == 0 {
-		return nil, fmt.Errorf("run has no diagnosis log")
+	if (r.Operation != "diagnose" && r.Operation != "verify") || len(r.Iterations) == 0 {
+		return nil, fmt.Errorf("run has no command log")
 	}
 	it := r.Iterations[len(r.Iterations)-1]
 	if it.Reproduction == nil || it.Reproduction.Log == "" {

@@ -61,7 +61,7 @@ Open questions: how much command detection can be reliable, when checks should r
 
 ## Focused investigation MCP tools
 
-Extend the worker beyond implementation with compact, evidence-backed investigations. The orchestrator should receive answers and findings rather than repeated source dumps. `worker_explore` and `worker_diagnose` now have first implementations. Diagnosis executes optional caller-specified reproduction in an isolated runtime without writing the original worktree. `worker_verify`, `worker_review`, and asynchronous execution remain proposed. See README for the implemented contract and limitations.
+Extend the worker beyond implementation with compact, evidence-backed investigations. The orchestrator should receive answers and findings rather than repeated source dumps. `worker_explore` and `worker_diagnose` now have first implementations. Diagnosis executes optional caller-specified reproduction in an isolated runtime without writing the original worktree. `worker_verify` now executes explicit check commands without a model, reusing the isolated runtime and bounded log retrieval. `worker_review` and asynchronous execution remain proposed. See README for the implemented contract and limitations.
 
 | Tool | Intended result | Execution boundary |
 | --- | --- | --- |

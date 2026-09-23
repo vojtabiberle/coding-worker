@@ -61,7 +61,7 @@ type ExploreResult struct {
 	Error        string               `json:"error,omitempty"`
 }
 type ResultRequest struct {
-	Log             bool   `json:"log,omitempty" jsonschema:"Retrieve a bounded reproduction.log byte range for a diagnosis run."`
+	Log             bool   `json:"log,omitempty" jsonschema:"Retrieve a bounded reproduction.log byte range for a diagnosis or verification run."`
 	LogOffset       int    `json:"log_offset,omitempty" jsonschema:"One-based log byte offset; default 1. Continue with returned next_offset."`
 	RunID           string `json:"run_id"`
 	MaxOutputTokens int    `json:"max_output_tokens,omitempty"`
@@ -260,6 +260,9 @@ func exploreFreshness(ctx context.Context, r store.Run) string {
 	if it.Before.Fingerprint != it.After.Fingerprint || s.Fingerprint != it.After.Fingerprint {
 		return "stale"
 	}
+	if r.Operation == "verify" {
+		return "current"
+	}
 	var report Exploration
 	if json.Unmarshal([]byte(it.Result.Report), &report) != nil {
 		return "unknown"
@@ -377,6 +380,16 @@ func (a *App) QueryResult(ctx context.Context, in ResultRequest) (any, error) {
 	if e != nil {
 		return nil, e
 	}
+	if r.Operation == "verify" {
+		if _, e = a.Result(in.RunID); e != nil {
+			return nil, e
+		}
+		r, e = a.Store.Get(in.RunID)
+		if e != nil {
+			return nil, e
+		}
+		return verifyView(ctx, r, in.MaxOutputTokens)
+	}
 	if !investigation(r.Operation) {
 		return a.Result(in.RunID)
 	}
@@ -395,7 +408,7 @@ func (a *App) Status(ctx context.Context, id string) (any, error) {
 		return nil, e
 	}
 	fresh := ""
-	if investigation(v.Operation) {
+	if investigation(v.Operation) || v.Operation == "verify" {
 		r, e := a.Store.Get(id)
 		if e != nil {
 			return nil, e

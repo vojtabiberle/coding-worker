@@ -137,8 +137,8 @@ func (a *App) Continue(ctx context.Context, in ContinueRequest) (Result, error) 
 	if e != nil {
 		return Result{}, e
 	}
-	if investigation(r.Operation) {
-		return Result{}, fmt.Errorf("use worker_explore with run_id for investigation follow-ups")
+	if investigation(r.Operation) || r.Operation == "verify" {
+		return Result{}, fmt.Errorf("use the matching investigation tool; verification requires a new run")
 	}
 	if r.Session == "" {
 		return Result{}, fmt.Errorf("run has no resumable OpenCode session")

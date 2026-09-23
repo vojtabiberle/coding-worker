@@ -95,6 +95,7 @@ Set client execution timeouts appropriately; cancellation kills the OpenCode pro
 
 - `worker_implement`: required absolute `cwd` and `objective`; optional `constraints`, `acceptance_criteria`, `relevant_context`, `profile`, `origin`.
 - `worker_continue`: `run_id`, `feedback`, optional additional `acceptance_criteria`.
+- `worker_verify`: execute an explicit check without a model; bounded results and paginated logs. See verification below.
 - `worker_diagnose`: diagnosis with optional caller-specified reproduction, evidence-backed cause/hypothesis, and proposed minimal fix. See diagnosis below.
 - `worker_explore`: focused read-only investigation; new requests take absolute `cwd` and `question`, follow-ups take `run_id` and `question`. See read-only exploration below.
 - `worker_status`: `run_id`; compact execution metadata without a report.
@@ -294,3 +295,19 @@ Retrieve bounded log ranges through `worker_result`:
 `log_offset` is a one-based **byte** offset. Follow the returned `next_offset` while `more` is true. There is no arbitrary file-path input. The payload stays within the requested conservative byte/token budget. Logs can contain sensitive command output; they remain private and have no automatic retention policy.
 
 Follow up with `worker_diagnose` using the same `run_id` and a new `question`. Omitting `reproduction_command` reuses the previous observation without rerunning it; supplying a command executes a new attempt. Source drift requires a new run. Log retrieval selects the latest observation (which may have been reused); older attempts remain in SQLite iteration records and private log files. `worker_explore` and `worker_continue` do not resume diagnosis runs. Diagnoses do not participate in implementation experiment assignments.
+
+### Verification
+
+`worker_verify` executes one explicit check command per run, without OpenCode or model configuration:
+
+```json
+{"cwd":"/absolute/repo","command":["npm","test","--","--runInBand"],"timeout_seconds":120,"max_output_tokens":800}
+```
+
+Use a repository check script to combine checks, ensuring it propagates failures. The worker reports observed `passed` (exit 0), `failed` (nonzero exit), `timed_out`, `cancelled`, or `start_failed`; exit 0 alone does not establish test coverage or correctness. Run `state` describes execution/persistence, separately from check `outcome`.
+
+Linux and Bubblewrap are required. Commands use the diagnosis sandbox: filesystem read-only except private temporary storage, network disabled, minimal environment, timeout default 30/max 120 seconds. Checks writing build output into the repository will fail; configure their output/cache into `$TMPDIR` through an explicitly invoked shell where supported. Dependencies must already be present. No automatic check discovery or writable worktree copy is provided.
+
+Responses include elapsed time, repository fingerprint/freshness, and a bounded log excerpt with line number. `worker_status` stays compact; `worker_result` retrieves the summary, or `log:true` with `log_offset` retrieves log pages. Logs retain up to 8 MiB; excess output is drained and `log_truncated` is set. The default budget is 800 conservative UTF-8 bytes (512–8192). `truncated` marks shortened excerpts. Full retained logs and original argv remain in local run artifacts. Freshness covers Git state including dirty/untracked files, not ignored dependencies or environment changes.
+
+Every call starts a new run; reading status/results never reruns checks. Verification does not participate in model experiments and cannot be resumed through `worker_continue`.
