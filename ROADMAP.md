@@ -2,6 +2,68 @@
 
 These are proposed directions, not implementation commitments. Keep each feature optional and preserve explicit profile selection.
 
+## Repository profiles with independent provider credentials
+
+Combine provider settings in worker profiles with repository-level profile selection through Git config. A repository could select a company account, another API key, a proxy, or a custom endpoint without changing the user's normal backend configuration or requiring those credentials to be saved in OpenCode.
+
+### Provider settings per profile
+
+Extend the global worker profile with provider identity, optional adapter, custom base URL, model definitions where required, and a reference to the API key. Illustrative syntax only; these fields are not implemented:
+
+```toml
+[profiles.company]
+engine = "opencode"
+model = "company/my-model"
+agent = "build"
+max_steps = 50
+
+[profiles.company.provider]
+id = "company"
+adapter = "@ai-sdk/openai-compatible"
+base_url = "https://ai.example.com/v1"
+api_key_env = "COMPANY_AI_API_KEY"
+```
+
+- Resolve credentials from the worker server's environment at execution time. Store references, not secret values, in profile snapshots, SQLite, MCP results and logs. Fail clearly if a referenced variable is missing; do not silently fall back to the user's usual account.
+- Apply overrides only to the child process for that run. Do not mutate shared process environment or OpenCode's config/auth files; concurrent repositories may use different accounts.
+- For the OpenCode adapter, construct a `provider` overlay in `OPENCODE_CONFIG_CONTENT`. Map the credential reference to `options.apiKey: "{env:COMPANY_AI_API_KEY}"` and URL to `options.baseURL`. Custom provider IDs also need model definitions and the appropriate SDK adapter.
+- Preserve profile/session identity on continuation. Define credential rotation and missing-variable behavior explicitly without persisting the resolved key.
+- Keep provider-specific translation in the backend adapter. Future backends need not use OpenCode's option names.
+
+### Feasibility evidence
+
+Verified on **2026-09-23 with OpenCode 1.18.32**, using isolated temporary HOME/XDG directories, dummy keys, and a local HTTP server. Configuration was passed through `OPENCODE_CONFIG_CONTENT`; the server intentionally returned HTTP 401 after recording the request. No real credentials or paid model calls were used.
+
+| Probe | Observed result |
+| --- | --- |
+| Custom provider `worker-probe`, adapter `@ai-sdk/openai-compatible` | Request reached the configured `/custom/v1/chat/completions` endpoint with the selected model |
+| Built-in `openai`, adapter `@ai-sdk/openai` | Request reached the configured `/custom/v1/responses` endpoint with the selected model |
+| `options.apiKey` referencing an environment variable, while `auth.json` held a different dummy key | Both providers sent the override key in the Authorization header |
+| Existing authentication file | Remained unchanged after both probes |
+
+This verifies configuration loading, credential precedence and HTTP routing, not a successful model response or every provider/authentication type. The probes tested overriding an existing API key; add a regression with no saved credential as part of implementation, along with missing-variable handling, concurrent account isolation and secret-free persistence.
+
+Official documentation confirms [custom providers, API keys, base URLs and adapters](https://opencode.ai/docs/providers/#custom-provider), [environment substitution](https://opencode.ai/docs/config/#env-vars), and [runtime configuration precedence](https://opencode.ai/docs/config/#precedence-order). Inline configuration overrides ordinary global/project settings; managed administrator settings can still take precedence. OAuth-based authentication may need provider-specific handling beyond these API-key probes.
+
+### Profile selection through Git config
+
+Add a `coding-worker.profile` key as an alternative to repository TOML files. Proposed usage (not yet read by coding-worker):
+
+```sh
+git config --local coding-worker.profile company
+git config --local --get coding-worker.profile
+```
+
+The repository stores only a profile name; its definition stays in the global worker config and its key stays in an environment variable. This permits private per-repository choices without committing a configuration file. All clients still share the same worker data directory.
+
+- Read Git config through Git in the canonical worktree, retaining the existing protection against inherited `GIT_*` overrides. Do not parse `.git/config` directly; linked worktrees can have a `.git` file.
+- Define local/worktree/global scopes and conditional includes. Repository-local config is shared by linked worktrees; decide whether to support Git's worktree-specific config when enabled, without enabling it implicitly.
+- Proposed precedence: explicit invocation profile > `.coding-worker.local.toml` > effective Git `coding-worker.profile` > `.coding-worker.toml` > global worker default. Finalize this contract before implementation, including how Git global defaults interact with project selection.
+- Show the selected profile and configuration source in `workerctl status`/`doctor`; reject unknown profiles rather than silently selecting another account.
+- Specify how this selection interacts with experiments and future routing. An explicitly chosen repository account must not silently become another account through automatic profile assignment.
+
+End-to-end acceptance: two repositories select different profiles through Git config, use distinct environment-provided keys and endpoints without saving those keys in OpenCode, run concurrently without credential crossover, and retain correct profile/session behavior on continuation. Existing TOML-only setups must keep working.
+
 ## Task-aware worker routing
 
 Use a small, fast model to select the implementation profile best suited to a task. Consider the objective, relevant repository context, task complexity, available agents/models, and cost or latency preferences.
@@ -67,8 +129,9 @@ Open questions: how much command detection can be reliable, when checks should r
 
 ## Suggested order
 
-1. Repository check discovery/configuration and separate completion evidence for tests, builds, and type checks.
-2. Review integration, change attribution, and branch/base-ref scope.
-3. Explicit cancellation and durable execution/recovery.
-4. Task-aware routing evaluated against externally verified outcomes and correction counts.
-5. Remote transport and synchronization contract before automatic change transfer.
+1. Provider overrides and Git-config profile selection, with credential isolation and explicit precedence.
+2. Repository check discovery/configuration and separate completion evidence for tests, builds, and type checks.
+3. Review integration, change attribution, and branch/base-ref scope.
+4. Explicit cancellation and durable execution/recovery.
+5. Task-aware routing evaluated against externally verified outcomes and correction counts.
+6. Remote transport and synchronization contract before automatic change transfer.
