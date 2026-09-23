@@ -37,12 +37,23 @@ func New(a *worker.App) *sdk.Server {
 		v, e := a.Continue(ctx, in)
 		return response(v, e)
 	})
-	for _, name := range []string{"worker_status", "worker_result"} {
-		sdk.AddTool(s, &sdk.Tool{Name: name, Description: "Get current run, latest iteration, metrics and reviews without raw logs.", Annotations: &sdk.ToolAnnotations{ReadOnlyHint: true}}, func(ctx context.Context, _ *sdk.CallToolRequest, in RunID) (*sdk.CallToolResult, any, error) {
-			v, e := a.Result(in.RunID)
-			return response(v, e)
-		})
-	}
+
+	sdk.AddTool(s, &sdk.Tool{Name: "worker_explore", Description: "Read-only investigation with source evidence. Requires absolute cwd and question for a new run; use run_id and question for follow-up. Linux/bubblewrap required. Default response budget 800 conservative tokens (UTF-8 bytes). No implementation or shell commands.", Annotations: &sdk.ToolAnnotations{ReadOnlyHint: true}}, func(ctx context.Context, _ *sdk.CallToolRequest, in worker.ExploreRequest) (*sdk.CallToolResult, any, error) {
+		v, e := a.Explore(ctx, in)
+		return exploreResponse(v, e, in.MaxOutputTokens)
+	})
+	sdk.AddTool(s, &sdk.Tool{Name: "worker_status", Description: "Compact execution status; does not return the report. Exploration freshness is current, stale, or unknown.", Annotations: &sdk.ToolAnnotations{ReadOnlyHint: true}}, func(ctx context.Context, _ *sdk.CallToolRequest, in RunID) (*sdk.CallToolResult, any, error) {
+		v, e := a.Status(ctx, in.RunID)
+		return compactResponse(v, e)
+	})
+	sdk.AddTool(s, &sdk.Tool{Name: "worker_result", Description: "Retrieve implementation result or budgeted exploration findings. For exploration use detail=true for quotes/hashes and finding_offset to page; increase max_output_tokens if a finding cannot fit. Default 800, maximum 8192.", Annotations: &sdk.ToolAnnotations{ReadOnlyHint: true}}, func(ctx context.Context, _ *sdk.CallToolRequest, in worker.ResultRequest) (*sdk.CallToolResult, any, error) {
+		v, e := a.QueryResult(ctx, in)
+		if ex, ok := v.(worker.ExploreResult); ok {
+			return exploreResponse(ex, e, in.MaxOutputTokens)
+		}
+		return compactResponse(v, e)
+	})
+
 	sdk.AddTool(s, &sdk.Tool{Name: "worker_record_review", Description: "Attach an external reviewer verdict and optional test/E2E/human outcomes to latest completed iteration. verdict must be accepted, changes_requested, or rejected. Use accepted for approval; approved is not supported."}, func(ctx context.Context, _ *sdk.CallToolRequest, in store.Review) (*sdk.CallToolResult, any, error) {
 		e := a.Review(in)
 		return response(map[string]bool{"recorded": e == nil}, e)
@@ -50,3 +61,43 @@ func New(a *worker.App) *sdk.Server {
 	return s
 }
 func Serve(ctx context.Context, a *worker.App) error { return New(a).Run(ctx, &sdk.StdioTransport{}) }
+
+// Text-only JSON avoids duplicating reports in both MCP content channels.
+func compactResponse(v any, e error) (*sdk.CallToolResult, any, error) {
+	if e != nil {
+		v = map[string]any{"error": clipError(e.Error()), "result": v}
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil, nil, err
+	}
+	return &sdk.CallToolResult{IsError: e != nil, Content: []sdk.Content{&sdk.TextContent{Text: string(b)}}}, nil, nil
+}
+func clipError(s string) string {
+	if len(s) > 200 {
+		return s[:200]
+	}
+	return s
+}
+
+func exploreResponse(v worker.ExploreResult, e error, budget int) (*sdk.CallToolResult, any, error) {
+	if budget < 512 || budget > 8192 {
+		budget = 800
+	}
+	if e != nil {
+		v.Error = clipError(e.Error())
+	}
+	b, _ := json.Marshal(v)
+	if len(b) > budget {
+		v.Answer = ""
+		v.Findings = nil
+		v.More = true
+		v.Truncated = true
+		v.NextOffset = 0
+		if len(v.Error) > 80 {
+			v.Error = v.Error[:80]
+		}
+		b, _ = json.Marshal(v)
+	}
+	return &sdk.CallToolResult{IsError: e != nil, Content: []sdk.Content{&sdk.TextContent{Text: string(b)}}}, nil, nil
+}

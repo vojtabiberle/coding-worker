@@ -49,6 +49,7 @@ type ContinueRequest struct {
 }
 type Result struct {
 	RunID      string              `json:"run_id"`
+	Operation  string              `json:"operation,omitempty"`
 	State      string              `json:"state"`
 	Workspace  workspace.Workspace `json:"workspace"`
 	Config     config.Resolved     `json:"config"`
@@ -136,6 +137,9 @@ func (a *App) Continue(ctx context.Context, in ContinueRequest) (Result, error) 
 	if e != nil {
 		return Result{}, e
 	}
+	if r.Operation == "explore" {
+		return Result{}, fmt.Errorf("use worker_explore with run_id for investigation follow-ups")
+	}
 	if r.Session == "" {
 		return Result{}, fmt.Errorf("run has no resumable OpenCode session")
 	}
@@ -161,6 +165,11 @@ func (a *App) execute(ctx context.Context, r *store.Run, before workspace.Snapsh
 		return Result{}, e
 	}
 	req := runner.Request{CWD: r.Workspace.Root, Prompt: prompt, Profile: r.Config.Profile, Lock: lock}
+	if r.Operation == "explore" {
+		req.ReadOnly = true
+		req.RuntimeDir = filepath.Join(a.Store.Dir, "explore", r.ID)
+		req.Profile.Agent = runner.ExploreAgent + "-" + r.ID
+	}
 	return a.invoke(ctx, r, req, resume)
 }
 func (a *App) invoke(ctx context.Context, r *store.Run, req runner.Request, resume bool) (Result, error) {
@@ -191,6 +200,18 @@ func (a *App) invoke(ctx context.Context, r *store.Run, req runner.Request, resu
 	if e != nil {
 		runErr = errors.Join(runErr, e)
 	}
+	if r.Operation == "explore" && after.Fingerprint != i.Before.Fingerprint {
+		runErr = errors.Join(runErr, fmt.Errorf("repository changed during exploration; conclusions are stale"))
+	}
+	if r.Operation == "explore" && runErr == nil {
+		report, err := parseExploration(result.Report, r.Workspace.Root)
+		if err != nil {
+			runErr = err
+		} else {
+			b, _ := json.Marshal(report)
+			i.Result.Report = string(b)
+		}
+	}
 	if after.SHA != "" && (after.SHA != i.Before.SHA || after.Branch != i.Before.Branch) {
 		runErr = errors.Join(runErr, fmt.Errorf("worker changed HEAD or branch unexpectedly"))
 	}
@@ -202,7 +223,7 @@ func (a *App) invoke(ctx context.Context, r *store.Run, req runner.Request, resu
 		i.Error = runErr.Error()
 	}
 	if e = a.Store.Save(r); e != nil {
-		return Result{RunID: r.ID, State: r.State}, fmt.Errorf("persist final run: %w", e)
+		return Result{RunID: r.ID, Operation: r.Operation, State: r.State}, fmt.Errorf("persist final run: %w", e)
 	}
 	slog.Info("worker finished", "run_id", r.ID, "worktree", r.Workspace.Root, "profile", r.Config.Name, "model", r.Config.Profile.Model, "session", r.Session, "duration", now.Sub(i.Started).String(), "exit_status", result.Exit)
 	v, e := a.view(*r)
@@ -210,7 +231,7 @@ func (a *App) invoke(ctx context.Context, r *store.Run, req runner.Request, resu
 }
 func (a *App) view(r store.Run) (Result, error) {
 	reviews, e := a.Store.Reviews(r.ID)
-	v := Result{RunID: r.ID, State: r.State, Workspace: r.Workspace, Config: r.Config, Provider: r.Provider, Session: r.Session, Iterations: len(r.Iterations), Started: r.Started, Finished: r.Finished, Reviews: reviews}
+	v := Result{RunID: r.ID, Operation: r.Operation, State: r.State, Workspace: r.Workspace, Config: r.Config, Provider: r.Provider, Session: r.Session, Iterations: len(r.Iterations), Started: r.Started, Finished: r.Finished, Reviews: reviews}
 	if len(r.Iterations) > 0 {
 		i := r.Iterations[len(r.Iterations)-1]
 		i.Before.Diff = ""

@@ -18,6 +18,8 @@ import (
 
 type Request struct {
 	CWD, Prompt string
+	ReadOnly    bool
+	RuntimeDir  string
 	Profile     config.Profile
 	Lock        *os.File
 	Event       func(json.RawMessage) error
@@ -155,14 +157,26 @@ func (o OpenCode) run(ctx context.Context, session string, r Request) (Result, e
 	if session != "" {
 		args = append(args, "--session", session)
 	}
-	// Send prompt on stdin to avoid argv size limits and process-list disclosure.
-	c := exec.CommandContext(ctx, o.Binary(), args...)
-	c.Dir = r.CWD
-	c.Stdin = strings.NewReader(r.Prompt)
 	env, e := runtimeEnv(r.Profile)
 	if e != nil {
 		return out, e
 	}
+	binary := o.Binary()
+	if r.ReadOnly {
+		args = append(args, "--pure")
+		env, e = exploreEnv(env, r)
+		if e != nil {
+			return out, e
+		}
+		binary, args, env, e = exploreCommand(binary, args, r, env)
+		if e != nil {
+			return out, e
+		}
+	}
+	// Send prompts on stdin rather than exposing them in argv.
+	c := exec.CommandContext(ctx, binary, args...)
+	c.Dir = r.CWD
+	c.Stdin = strings.NewReader(r.Prompt)
 	c.Env = env
 	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if r.Lock != nil {
@@ -186,6 +200,9 @@ func (o OpenCode) run(ctx context.Context, session string, r Request) (Result, e
 	waitErr := c.Wait()
 	out.Exit = c.ProcessState.ExitCode()
 	if parseErr != nil {
+		if r.ReadOnly && out.Session == "" {
+			return out, fmt.Errorf("read-only OpenCode sandbox failed; check bubblewrap/user namespaces and OpenCode --pure support: %w", parseErr)
+		}
 		return out, parseErr
 	}
 	if waitErr != nil {

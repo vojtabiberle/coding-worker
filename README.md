@@ -95,7 +95,9 @@ Set client execution timeouts appropriately; cancellation kills the OpenCode pro
 
 - `worker_implement`: required absolute `cwd` and `objective`; optional `constraints`, `acceptance_criteria`, `relevant_context`, `profile`, `origin`.
 - `worker_continue`: `run_id`, `feedback`, optional additional `acceptance_criteria`.
-- `worker_status` / `worker_result`: `run_id`; current state, workspace, pinned profile/model/provider, session, iteration count, timestamps, latest iteration and external reviews. Large raw diffs and event logs are omitted.
+- `worker_explore`: focused read-only investigation; new requests take absolute `cwd` and `question`, follow-ups take `run_id` and `question`. See read-only exploration below.
+- `worker_status`: `run_id`; compact execution metadata without a report.
+- `worker_result`: `run_id`; implementation result or bounded exploration findings. Raw diffs and event logs are omitted.
 - `worker_record_review`: `run_id`, `verdict` (`accepted`, `changes_requested`, `rejected`), `reviewer`, `blocker`, `major`, `minor`, `notes`; optional nullable `tests_passed`, `hidden_e2e_success`, `human_intervention`.
 
 Example implementation request:
@@ -208,3 +210,52 @@ Tests use temporary Git repositories/worktrees, independent SQLite connections, 
 - SQLite busy/I/O errors: all clients must share local durable storage; avoid network filesystems. Disk/persistence errors fail the request visibly.
 
 Documentation checked before implementation: [OpenCode CLI](https://opencode.ai/docs/cli/), [runtime config](https://opencode.ai/docs/config/), [agent steps](https://opencode.ai/docs/agents/), [Codex MCP](https://developers.openai.com/codex/mcp), [Claude Code MCP](https://code.claude.com/docs/en/mcp). OpenCode's CLI source was also checked for stdin prompts, session IDs, and JSON event shapes.
+
+## Read-only exploration
+
+`worker_explore` answers a focused repository question without implementing changes. It is currently synchronous and requires **Linux, Bubblewrap (`bwrap`), working user namespaces, and OpenCode with `--pure` support**. Implementation commands retain their previous platform support. Unsupported exploration environments fail closed; there is no unsandboxed fallback.
+
+```json
+{
+  "cwd": "/home/YOU/git/project-worktree",
+  "question": "Explore the keypress → PTY → rendering path. Find possible latency sources. Change nothing.",
+  "max_output_tokens": 800
+}
+```
+
+The configured profile supplies the model and step limit. Exploration uses a dedicated per-run read-only agent, not the profile's implementation agent. Only `read`, `glob`, and `grep` are allowed; shell, edits, delegation, LSP, and other tools are denied. `--pure` disables external plugins. Bubblewrap mounts the host filesystem read-only, with private device/process mounts and a single writable directory for this investigation's OpenCode data, cache, temporary files, and session. Symlinks cannot turn a read-only host path into a writable path. Provider network access remains enabled; this is filesystem write isolation, not network isolation or protection from a compromised host/kernel.
+
+Private state is stored under `CODING_WORKER_DATA/explore/RUN_ID` (using the normal default data directory when unset). The runtime must be outside the target worktree. Existing OpenCode `auth.json` is copied privately on first use so credentials and sessions work without writing the original auth file. Environment credentials and normal provider configuration remain available. Authentication changes after starting an investigation do not refresh its private copy. Projects requiring plugin behavior or installation into read-only project/config directories may not work in exploration mode.
+
+A worktree lock is held for the whole investigation, excluding other coding-worker writers and explorations on that same tree. Other worktrees remain independent. External editors do not participate in this lock: before/after state checks detect ordinary drift, but are not snapshot isolation against transient external edits.
+
+The response separates `fact`, `hypothesis`, and `unverified` findings. Facts and hypotheses require `file`, `line`, `end_line`, and an exact source quote; the wrapper checks quotes against the cited lines and records file hashes. Matching a quote verifies the citation, **not the model's interpretation of it**. Unverified findings explain missing evidence. Malformed reports and unsupported citations fail visibly rather than becoming accepted facts.
+
+Responses default to an 800-unit conservative budget, enforced on the UTF-8 serialized JSON payload at the MCP boundary. One budget unit allows one byte, conservatively bounding token use without choosing a provider-specific tokenizer. This can be considerably shorter than 800 actual model tokens. Accepted budgets: 512–8192. Only one text JSON payload is emitted, avoiding duplicate text/structured reports. `truncated` identifies shortened content; `more` and `next_offset` paginate findings. If a finding cannot fit, the offset does not advance: request a larger budget or the summary form.
+
+Ask a follow-up using the same run/session:
+
+```json
+{"run_id":"RUN_ID","question":"Is the polling on input or only on output refresh?"}
+```
+
+Omit `cwd` and `profile` on follow-up. `worker_continue` remains implementation-only. A follow-up retains context and model selection but rejects stale or unverifiable state; start a new exploration after external changes.
+
+`worker_status` now returns compact metadata for all runs, without reports. `worker_result` preserves implementation results and returns bounded exploration findings. To fetch citations and longer text without rerunning the model:
+
+```json
+{"run_id":"RUN_ID","detail":true,"finding_offset":0,"max_output_tokens":4096}
+```
+
+Full validated exploration reports remain in SQLite iteration records. Freshness is `current`, `stale`, or `unknown`, based on worktree identity, HEAD/branch, index, tracked changes, untracked content, and hashes of cited files (including cited ignored files). It does not cover uncited ignored files, external dependencies, or runtime environment changes. Old source locations always refer to the recorded state. Running or unavailable worktrees return unknown freshness; results changed during exploration are stale.
+
+Explorations are excluded from implementation experiment assignments. A timeout does not prove that a run succeeded or failed: retrieve status by a known run ID, or identify it through `workerctl sessions` before retrying. This version does not yet return a run ID asynchronously before execution.
+
+Additional verification without paid inference:
+
+```sh
+# Test the installed OpenCode config schema inside the read-only sandbox:
+CODING_WORKER_CONFIG_TEST=1 go test ./runner -run TestInstalledExploreConfig -v
+```
+
+Normal tests use a fake engine/executable and exercise source evidence, follow-up, freshness, output budgets, real Bubblewrap write denial, and cancellation. Sandbox tests skip when `bwrap` is absent; failures when it is installed should be investigated rather than treated as a passing sandbox check.

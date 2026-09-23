@@ -19,6 +19,7 @@ import (
 )
 
 type Run struct {
+	Operation  string              `json:"operation,omitempty"`
 	ID         string              `json:"run_id"`
 	Origin     string              `json:"origin,omitempty"`
 	Workspace  workspace.Workspace `json:"workspace"`
