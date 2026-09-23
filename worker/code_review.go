@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"coding-worker/runner"
-	"coding-worker/workspace"
+	"github.com/vojtabiberle/coding-worker/runner"
+	"github.com/vojtabiberle/coding-worker/workspace"
 )
 
 // ReviewCode is distinct from recording an external acceptance verdict.

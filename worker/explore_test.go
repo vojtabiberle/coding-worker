@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"coding-worker/internal/testutil"
-	"coding-worker/runner"
-	"coding-worker/workspace"
+	"github.com/vojtabiberle/coding-worker/internal/testutil"
+	"github.com/vojtabiberle/coding-worker/runner"
+	"github.com/vojtabiberle/coding-worker/workspace"
 )
 
 func explorationFixture() string {

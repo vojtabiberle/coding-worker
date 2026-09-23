@@ -1,12 +1,12 @@
 package worker
 
 import (
-	"coding-worker/internal/testutil"
-	"coding-worker/runner"
-	"coding-worker/store"
-	"coding-worker/workspace"
 	"context"
 	"errors"
+	"github.com/vojtabiberle/coding-worker/internal/testutil"
+	"github.com/vojtabiberle/coding-worker/runner"
+	"github.com/vojtabiberle/coding-worker/store"
+	"github.com/vojtabiberle/coding-worker/workspace"
 	"os"
 	"path/filepath"
 	"sync"

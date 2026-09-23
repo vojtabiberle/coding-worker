@@ -12,11 +12,11 @@ import (
 	"strings"
 	"time"
 
-	"coding-worker/config"
-	"coding-worker/runner"
-	"coding-worker/store"
-	"coding-worker/worker"
-	"coding-worker/workspace"
+	"github.com/vojtabiberle/coding-worker/config"
+	"github.com/vojtabiberle/coding-worker/runner"
+	"github.com/vojtabiberle/coding-worker/store"
+	"github.com/vojtabiberle/coding-worker/worker"
+	"github.com/vojtabiberle/coding-worker/workspace"
 )
 
 const Usage = `workerctl status | profiles | profile use NAME [--local]

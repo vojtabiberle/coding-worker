@@ -1,13 +1,13 @@
 package worker
 
 import (
-	"coding-worker/runner"
-	"coding-worker/store"
-	"coding-worker/workspace"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/vojtabiberle/coding-worker/runner"
+	"github.com/vojtabiberle/coding-worker/store"
+	"github.com/vojtabiberle/coding-worker/workspace"
 )
 
 // One correction within the same iteration/session; never rerun reproduction.

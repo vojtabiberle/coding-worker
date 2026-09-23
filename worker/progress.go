@@ -1,7 +1,7 @@
 package worker
 
 import (
-	"coding-worker/store"
+	"github.com/vojtabiberle/coding-worker/store"
 	"time"
 )
 

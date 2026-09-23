@@ -1,12 +1,12 @@
 package mcp
 
 import (
-	"coding-worker/store"
-	"coding-worker/worker"
 	"context"
 	"encoding/json"
 	"fmt"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/vojtabiberle/coding-worker/store"
+	"github.com/vojtabiberle/coding-worker/worker"
 	"strings"
 	"testing"
 )

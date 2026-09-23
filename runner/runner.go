@@ -12,8 +12,8 @@ import (
 	"syscall"
 	"time"
 
-	"coding-worker/config"
-	"coding-worker/workspace"
+	"github.com/vojtabiberle/coding-worker/config"
+	"github.com/vojtabiberle/coding-worker/workspace"
 )
 
 type Request struct {

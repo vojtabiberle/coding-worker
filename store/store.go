@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"coding-worker/config"
-	"coding-worker/runner"
-	"coding-worker/workspace"
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/vojtabiberle/coding-worker/config"
+	"github.com/vojtabiberle/coding-worker/runner"
+	"github.com/vojtabiberle/coding-worker/workspace"
 )
 
 type Run struct {

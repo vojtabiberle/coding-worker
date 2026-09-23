@@ -1,9 +1,9 @@
 package workspace
 
 import (
-	"coding-worker/internal/testutil"
 	"context"
 	"errors"
+	"github.com/vojtabiberle/coding-worker/internal/testutil"
 	"os"
 	"os/exec"
 	"path/filepath"

@@ -1,4 +1,4 @@
-module coding-worker
+module github.com/vojtabiberle/coding-worker
 
 go 1.26.0
 

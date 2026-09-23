@@ -1,9 +1,9 @@
 package runner
 
 import (
-	"coding-worker/config"
 	"context"
 	"encoding/json"
+	"github.com/vojtabiberle/coding-worker/config"
 	"os"
 	"path/filepath"
 	"strings"

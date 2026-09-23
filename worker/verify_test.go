@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"coding-worker/internal/testutil"
+	"github.com/vojtabiberle/coding-worker/internal/testutil"
 )
 
 func TestVerifyLifecycle(t *testing.T) {

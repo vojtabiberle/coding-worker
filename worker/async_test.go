@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"coding-worker/runner"
-	"coding-worker/workspace"
+	"github.com/vojtabiberle/coding-worker/runner"
+	"github.com/vojtabiberle/coding-worker/workspace"
 )
 
 type blockingEngine struct {

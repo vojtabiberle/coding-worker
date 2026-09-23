@@ -1,10 +1,10 @@
 package main
 
 import (
-	"coding-worker/mcp"
-	"coding-worker/worker"
 	"context"
 	"fmt"
+	"github.com/vojtabiberle/coding-worker/mcp"
+	"github.com/vojtabiberle/coding-worker/worker"
 	"log/slog"
 	"os"
 	"os/signal"

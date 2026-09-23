@@ -2,3 +2,11 @@
 .coding-worker.local.toml
 *.test
 coverage.out
+
+# Local credentials and runtime artifacts
+.env
+.env.*
+!.env.example
+*.db
+*.db-shm
+*.db-wal

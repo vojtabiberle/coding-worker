@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"coding-worker/internal/testutil"
-	"coding-worker/runner"
+	"github.com/vojtabiberle/coding-worker/internal/testutil"
+	"github.com/vojtabiberle/coding-worker/runner"
 )
 
 func TestCodeReviewLifecycle(t *testing.T) {

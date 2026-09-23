@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 
-	"coding-worker/store"
-	"coding-worker/worker"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/vojtabiberle/coding-worker/store"
+	"github.com/vojtabiberle/coding-worker/worker"
 )
 
 func response(v any, e error) (*sdk.CallToolResult, any, error) {

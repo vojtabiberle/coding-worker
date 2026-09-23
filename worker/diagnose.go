@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"coding-worker/runner"
+	"github.com/vojtabiberle/coding-worker/runner"
 )
 
 type DiagnoseRequest struct {

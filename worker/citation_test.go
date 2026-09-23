@@ -1,11 +1,11 @@
 package worker
 
 import (
-	"coding-worker/runner"
-	"coding-worker/store"
-	"coding-worker/workspace"
 	"context"
 	"encoding/json"
+	"github.com/vojtabiberle/coding-worker/runner"
+	"github.com/vojtabiberle/coding-worker/store"
+	"github.com/vojtabiberle/coding-worker/workspace"
 	"strings"
 	"testing"
 )

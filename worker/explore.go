@@ -13,10 +13,10 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"coding-worker/config"
-	"coding-worker/runner"
-	"coding-worker/store"
-	"coding-worker/workspace"
+	"github.com/vojtabiberle/coding-worker/config"
+	"github.com/vojtabiberle/coding-worker/runner"
+	"github.com/vojtabiberle/coding-worker/store"
+	"github.com/vojtabiberle/coding-worker/workspace"
 )
 
 type ExploreRequest struct {

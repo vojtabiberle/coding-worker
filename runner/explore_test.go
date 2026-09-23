@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"coding-worker/config"
-	"coding-worker/workspace"
+	"github.com/vojtabiberle/coding-worker/config"
+	"github.com/vojtabiberle/coding-worker/workspace"
 )
 
 func TestExploreSandbox(t *testing.T) {

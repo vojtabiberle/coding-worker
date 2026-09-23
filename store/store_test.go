@@ -1,9 +1,9 @@
 package store
 
 import (
-	"coding-worker/config"
-	"coding-worker/runner"
-	"coding-worker/workspace"
+	"github.com/vojtabiberle/coding-worker/config"
+	"github.com/vojtabiberle/coding-worker/runner"
+	"github.com/vojtabiberle/coding-worker/workspace"
 	"sync"
 	"testing"
 	"time"

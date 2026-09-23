@@ -2,11 +2,11 @@ package cli
 
 import (
 	"bytes"
-	"coding-worker/internal/testutil"
-	"coding-worker/runner"
-	"coding-worker/store"
-	"coding-worker/worker"
 	"context"
+	"github.com/vojtabiberle/coding-worker/internal/testutil"
+	"github.com/vojtabiberle/coding-worker/runner"
+	"github.com/vojtabiberle/coding-worker/store"
+	"github.com/vojtabiberle/coding-worker/worker"
 	"os"
 	"path/filepath"
 	"strings"

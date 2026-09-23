@@ -1,10 +1,10 @@
 package main
 
 import (
-	"coding-worker/cli"
-	"coding-worker/worker"
 	"context"
 	"fmt"
+	"github.com/vojtabiberle/coding-worker/cli"
+	"github.com/vojtabiberle/coding-worker/worker"
 	"log/slog"
 	"os"
 	"os/signal"

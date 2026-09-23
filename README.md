@@ -1,5 +1,7 @@
 # coding-worker
 
+[![CI](https://github.com/vojtabiberle/coding-worker/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/vojtabiberle/coding-worker/actions/workflows/ci.yml)
+
 Shared local coding worker for Codex, Claude Code, and other MCP clients. OpenCode implements, explores, diagnoses, and reviews code; deterministic verification runs explicit checks without a model. The calling orchestrator owns architecture, review, and acceptance. Switching worker models requires no MCP client changes.
 
 See [future version ideas](ROADMAP.md) for task-aware routing, remote execution, review integration, explicit cancellation, and repository check discovery.
@@ -11,6 +13,8 @@ The optional [coding-worker skill](skills/coding-worker/SKILL.md) guides tool se
 Requires Linux or macOS, Go 1.26+, a C compiler for SQLite, Git, and OpenCode on PATH. Windows is not supported; use WSL. Build and install both executables:
 
 ```sh
+git clone https://github.com/vojtabiberle/coding-worker.git
+cd coding-worker
 make test
 make install                         # binaries + Codex skill
 # or: make install PREFIX=/usr/local
@@ -82,7 +86,7 @@ command = "/home/YOU/.local/bin/coding-worker"
 tool_timeout_sec = 1800
 ```
 
-Or register with `codex mcp add coding-worker -- /home/YOU/.local/bin/coding-worker`, then set the longer tool timeout in TOML. The default Codex tool timeout is too short for many implementation tasks.
+Or register with `codex mcp add coding-worker -- /home/YOU/.local/bin/coding-worker`, then set the longer tool timeout in TOML. Execution runs asynchronously; the client timeout covers preflight and acknowledgement, not the full model run.
 
 Claude Code, globally:
 
@@ -355,12 +359,6 @@ Follow up with `run_id` and `question`. Git state drift rejects continuation. `w
 
 The initial scope is the final working tree versus `HEAD`, not a branch/base-ref review or separate index review. Review context (diff plus changed paths) above 128 KiB is rejected rather than silently truncated. Binary changes and missing runtime evidence should be described as limitations in the answer. Source citations are mechanically validated; the reviewer must still assess the model's reasoning.
 
-## Experience informing the workflow
-
-User-reported implementation feedback described two repaired output-reading bugs with regression tests, but also premature completion, missed daemon/concurrency concerns, and an unchecked TypeScript build after corrections. Three implementation/review rounds were needed; final tests and build were checked independently. This is qualitative feedback, not a model-ranking experiment.
-
-Keep tasks bounded with precise acceptance criteria. Check process ownership, cancellation, lock lifetime and cleanup when relevant; report tests, build and type checks separately. One reported MCP timeout occurred after 300 seconds while a result remained retrievable; that does not establish cancellation behavior. Retrieve known runs before retrying. The previously unclear review verdict is now documented and validated as `accepted`, not `approved`.
-
 ## MCP execution lifecycle and migration
 
 Reconnect MCP clients after installing the updated binary so `tools/list` and parameter schemas refresh. There are nine tools. Update requests from `max_output_tokens` to `max_output_bytes`; the old name is no longer advertised or supported. Read final reports with `worker_result` after status leaves `running`; the initial response is only an acknowledgement.
@@ -397,3 +395,9 @@ Diagnosis only advertises `reproduction.log` when a log actually exists. Without
 A rejected investigation report can be repaired with the same tool's `run_id` and a corrective `question`; no new run or session is required. The model receives the prior validation error and retained context. Validated citation hashes are saved even when diagnosis semantics are rejected. For historical failed reports lacking validated hashes (or readable JSON), repair eligibility uses the stored before/after and current repository fingerprints; absent hashes are not evidence of drift. Existing stored hashes are still checked. Unhashed ignored inputs cannot be revalidated historically. `freshness:current` on a failed run describes repository state, not valid conclusions. Real repository changes still reject continuation.
 
 For static diagnosis, source facts may be verified, but `cause_status:supported` requires an observed reproduction with source and log facts. A source guard suggesting a bug is fixed or unreachable still requires `hypothesis` or `unverified` and `reproduced:false` until runtime confirmation exists. The harness repeats these constraints alongside observations and on a corrective attempt.
+
+## Contributing and license
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for local checks and the pull request workflow. CI runs formatting, dependency verification, vet, race tests with Bubblewrap, and builds. It does not require provider credentials or run paid model calls. The `tests` check is required for merging into `master`; direct pushes, force pushes, deletions and administrator bypass are disabled by repository protection settings.
+
+Licensed under [Apache License 2.0](LICENSE).
