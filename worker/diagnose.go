@@ -72,7 +72,7 @@ func validateDiagnosis(v Exploration, r *runner.Reproduction) error {
 
 // Only the stored log of this run/iteration is retrievable; callers cannot supply paths.
 func (a *App) reproductionLog(ctx context.Context, in ResultRequest) (any, error) {
-	budget, e := outputBudget(in.MaxOutputTokens)
+	budget, e := outputBudget(in.MaxOutputBytes)
 	if e != nil {
 		return nil, e
 	}

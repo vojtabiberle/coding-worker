@@ -28,29 +28,32 @@ Select the coding-worker operation matching the task. Keep architecture, scope d
 
 Explore/diagnose/review start with absolute `cwd` and `question`, plus optional `profile`. Follow up through the same tool with `run_id` and `question`, omitting `cwd` and `profile`. `worker_continue` is implementation-only. Investigations use the configured profile outside implementation experiments. Review scope is working tree against HEAD including untracked files; no arbitrary base-ref support. Pre-existing dirty changes are included. `review.diff` citations use diff line numbers, especially for deleted code.
 
-Diagnosis can take `reproduction_command` as explicit argv. Omit it for static diagnosis or to reuse prior observations on follow-up; supplying it runs a new attempt. Verification requires `command` argv and always starts a new run. These commands have a default 30-second timeout, maximum 120; no shell interpolation unless explicitly invoking a shell. A failed command or environment error does not prove the reported bug was reproduced.
+Diagnosis can take `reproduction_command` as explicit argv. Omit it for static diagnosis or to reuse prior observations on follow-up; supplying it runs a new attempt. Verification requires `command` argv and always starts a new run. These commands have a default 30-second timeout, maximum 120; no shell interpolation unless explicitly invoking a shell. A failed command or environment error does not prove the reported bug was reproduced. Without reproduction, diagnosis cause_status must be hypothesis or unverified and reproduced=false, even when individual source facts are certain.
 
 These four tools require Linux/Bubblewrap. Model investigations have read/glob/grep access only. Reproduction/verification commands run with read-only host files, private temporary storage, minimal environment and no network. Checks writing repository build output may fail; use supported temporary output paths or report the limitation. Do not silently bypass the sandbox or install dependencies. Inference provider networking remains enabled.
 
 ## Retrieve evidence economically
 
-- Default `max_output_tokens` is a conservative 800 UTF-8 JSON **byte** budget, allowed 512–8192. Implementation results do not use this budget.
-- `worker_status` returns state, operation, iteration count, timestamps and applicable freshness, without a report. It never reruns work.
+- Reconnect after server upgrades to refresh tool schemas. Use `max_output_bytes`, replacing the unsupported old name `max_output_tokens`.
+- Default `max_output_bytes` is a conservative 800 UTF-8 JSON **byte** budget, allowed 512–8192. Implementation results do not use this budget.
+- `worker_status` returns state, operation, iteration count, timestamps, phase/last_progress and applicable freshness, without a report. Progress timestamps indicate phase transitions, not a heartbeat. It never reruns work.
 - `worker_result` returns stored findings/summary. Use `detail:true` for quotes/hashes and `finding_offset` from `next_offset` while `more` is true. If an item cannot fit and the offset does not advance, increase the budget or request summary form.
 - For diagnosis/verification logs, use `log:true` and one-based `log_offset`; continue with returned `next_offset`. Full retained logs stay in private files, capped at 8 MiB; `log_truncated` means output was lost. A shortened summary is separately marked `truncated`.
 - `current` freshness covers recorded Git state and cited source hashes, not all ignored dependencies or runtime inputs. `stale`/`unknown` conclusions cannot support current acceptance; inspect drift and start a new run when appropriate. Do not relabel old evidence as current.
+- Invalid source/artifact citations and invalid diagnosis claims share at most one automatic same-session correction; reproduction is not rerun. A second invalid report fails. If the repository is unchanged, send a corrective question through the same investigation tool/run_id to repair the rejected report without starting a new session. A failed run with current freshness still has an invalid report. This may add one model call. Errors name the offending citation and artifact. Diagnosis observation metadata is not log content: cite `reproduction.log` only when observations include `log_path`; otherwise describe the missing execution as unverified.
+- Error text respects the response budget; `truncated:true` marks shortening. Increase `max_output_bytes` to retrieve more text, up to 8192; larger errors remain in local run records.
 - Facts/hypotheses require checked citations, but quote validation does not validate reasoning. Review severity is high/medium/low. No findings is not proof of correctness. Verification `state` describes execution; `outcome` distinguishes passed/failed/timed_out/cancelled/start_failed, and passed only means exit 0.
 
 ## Delegate and track
 
 Call `worker_implement` with `cwd`, `objective`, and applicable `constraints`, `acceptance_criteria`, and `relevant_context`. Include the selected validation commands in the criteria and request their actual results, including skipped checks.
 
-Retain the returned `run_id` for status, correction, and review. Use `worker_status` or `worker_result` to inspect progress/results without fetching raw logs by default.
+MCP execution tools acknowledge with a persisted `run_id` and `state: running`, before work completes. Poll `worker_status` at reasonable intervals, then fetch `worker_result`; do not treat the acknowledgement as a completed report. Retain the returned `run_id` for status, correction, and review. Use `worker_status` or `worker_result` to inspect progress/results without fetching raw logs by default.
 
 - All operations hold the same worktree lock, including investigations. On `busy`, inspect known active work and retry only after it finishes. Do not delete locks or start a competing local implementation.
 - Different existing worktrees can execute independently when parallel delegation is in scope. Do not create extra branches/worktrees merely because the tools permit it.
 - While a worker writes, avoid your own edits and validation commands that mutate that same worktree.
-- Timeout is not proof of failure, cancellation, or success. If a run ID is known, retrieve status/result before resubmitting. If no ID was returned, use `workerctl sessions` when available and correlate workspace, time, and state; do not guess among ambiguous runs. Do not blindly repeat a potentially active implementation.
+- Request cancellation does not cancel an accepted background job. Disconnecting/stopping its stdio server cancels active jobs and waits for final persistence; CLI remains synchronous. Timeout is not proof of failure, cancellation, or success. If a run ID is known, retrieve status/result before resubmitting. If no ID was returned, use `workerctl sessions` when available and correlate workspace, time, and state; do not guess among ambiguous runs. Do not blindly repeat a potentially active implementation.
 - A cancelled or failed run may leave useful partial edits. Inspect its state and changes before deciding whether to resume or start another run. The current API has no dedicated cancellation tool; do not invent one.
 
 ## Independently review and validate

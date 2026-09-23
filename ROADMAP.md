@@ -57,7 +57,7 @@ Open questions: how much command detection can be reliable, when checks should r
 
 ## Investigation extensions
 
-- Return run IDs before long work completes; add explicit cancellation and document timeout/recovery semantics to prevent duplicate work.
+- Add explicit per-run cancellation and optional execution independent of a stdio server lifetime.
 - Add stable evidence IDs and targeted artifact retrieval, including remotely retrievable artifacts.
 - Identify which inputs changed when conclusions become stale, and selectively revalidate affected findings.
 - Track relevant ignored dependencies and runtime environment inputs beyond cited source hashes.
@@ -69,6 +69,6 @@ Open questions: how much command detection can be reliable, when checks should r
 
 1. Repository check discovery/configuration and separate completion evidence for tests, builds, and type checks.
 2. Review integration, change attribution, and branch/base-ref scope.
-3. Asynchronous execution, cancellation, and recovery.
+3. Explicit cancellation and durable execution/recovery.
 4. Task-aware routing evaluated against externally verified outcomes and correction counts.
 5. Remote transport and synchronization contract before automatic change transfer.

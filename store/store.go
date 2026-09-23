@@ -19,28 +19,31 @@ import (
 )
 
 type Run struct {
-	Operation  string              `json:"operation,omitempty"`
-	ID         string              `json:"run_id"`
-	Origin     string              `json:"origin,omitempty"`
-	Workspace  workspace.Workspace `json:"workspace"`
-	Base       string              `json:"base_sha"`
-	Config     config.Resolved     `json:"config"`
-	Provider   string              `json:"provider"`
-	Session    string              `json:"opencode_session_id"`
-	Started    time.Time           `json:"started_at"`
-	Finished   *time.Time          `json:"finished_at"`
-	State      string              `json:"state"`
-	Iterations []Iteration         `json:"iterations"`
+	Phase        string              `json:"phase,omitempty"`
+	LastProgress *time.Time          `json:"last_progress,omitempty"`
+	Operation    string              `json:"operation,omitempty"`
+	ID           string              `json:"run_id"`
+	Origin       string              `json:"origin,omitempty"`
+	Workspace    workspace.Workspace `json:"workspace"`
+	Base         string              `json:"base_sha"`
+	Config       config.Resolved     `json:"config"`
+	Provider     string              `json:"provider"`
+	Session      string              `json:"opencode_session_id"`
+	Started      time.Time           `json:"started_at"`
+	Finished     *time.Time          `json:"finished_at"`
+	State        string              `json:"state"`
+	Iterations   []Iteration         `json:"iterations"`
 }
 type Iteration struct {
-	Reproduction *runner.Reproduction `json:"reproduction,omitempty"`
-	Number       int                  `json:"number"`
-	Started      time.Time            `json:"started_at"`
-	Finished     *time.Time           `json:"finished_at"`
-	Before       workspace.Snapshot   `json:"before"`
-	After        workspace.Snapshot   `json:"after"`
-	Result       runner.Result        `json:"result"`
-	Error        string               `json:"error,omitempty"`
+	CitationAttempt *runner.Result       `json:"citation_attempt,omitempty"`
+	Reproduction    *runner.Reproduction `json:"reproduction,omitempty"`
+	Number          int                  `json:"number"`
+	Started         time.Time            `json:"started_at"`
+	Finished        *time.Time           `json:"finished_at"`
+	Before          workspace.Snapshot   `json:"before"`
+	After           workspace.Snapshot   `json:"after"`
+	Result          runner.Result        `json:"result"`
+	Error           string               `json:"error,omitempty"`
 }
 type Review struct {
 	RunID             string `json:"run_id"`

@@ -116,3 +116,22 @@ func TestRuntimeOverlayPreservesRestrictions(t *testing.T) {
 		t.Fatal(m)
 	}
 }
+
+func TestFailureIncludesProviderCauseAndStderr(t *testing.T) {
+	for _, tc := range []struct{ name, script, want string }{
+		{"provider", `printf '%s\n' '{"type":"error","sessionID":"ses_failed","error":{"name":"UnknownError","data":{"message":"Upstream model stream stalled: no data received for 300000ms"}}}'; exit 1`, "Upstream model stream stalled"},
+		{"stderr", `printf '%s\n' '{"type":"text","sessionID":"ses_failed","part":{"text":""}}'; echo 'provider credentials missing' >&2; exit 1`, "provider credentials missing"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := t.TempDir()
+			bin := filepath.Join(d, "fake")
+			if e := os.WriteFile(bin, []byte("#!/bin/sh\n"+tc.script), 0700); e != nil {
+				t.Fatal(e)
+			}
+			r, e := (OpenCode{bin}).Start(context.Background(), Request{CWD: d, Profile: config.Profile{Agent: "worker"}})
+			if e == nil || !strings.Contains(e.Error(), tc.want) || len(r.Failures) == 0 {
+				t.Fatal(r, e)
+			}
+		})
+	}
+}

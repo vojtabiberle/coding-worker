@@ -27,7 +27,7 @@ func TestVerifyLifecycle(t *testing.T) {
 		{"printf 'assertion failed\\n'; exit 7", "failed", 7},
 		{"printf changed > existing.txt", "failed", -1},
 	} {
-		v, e := a.Verify(ctx, VerifyRequest{CWD: root, Command: []string{"/bin/sh", "-c", tc.script}, MaxOutputTokens: 512})
+		v, e := a.Verify(ctx, VerifyRequest{CWD: root, Command: []string{"/bin/sh", "-c", tc.script}, MaxOutputBytes: 512})
 		if e != nil || v.State != "completed" || v.Outcome != tc.outcome || v.Exit == nil || (tc.exit >= 0 && *v.Exit != tc.exit) || v.Freshness != "current" {
 			t.Fatalf("%+v %v", v, e)
 		}

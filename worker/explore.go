@@ -20,11 +20,11 @@ import (
 )
 
 type ExploreRequest struct {
-	CWD             string  `json:"cwd,omitempty" jsonschema:"Absolute worktree path, required for a new investigation."`
-	RunID           string  `json:"run_id,omitempty" jsonschema:"Existing explore/diagnose/review run of the matching tool to resume; omit cwd and profile on follow-up."`
-	Question        string  `json:"question"`
-	Profile         *string `json:"profile,omitempty"`
-	MaxOutputTokens int     `json:"max_output_tokens,omitempty" jsonschema:"Default 800, range 512 to 8192. Conservative UTF-8 JSON byte budget, at most one byte per token allowance."`
+	CWD            string  `json:"cwd,omitempty" jsonschema:"Absolute worktree path, required for a new investigation."`
+	RunID          string  `json:"run_id,omitempty" jsonschema:"Existing explore/diagnose/review run of the matching tool to resume; omit cwd and profile on follow-up."`
+	Question       string  `json:"question"`
+	Profile        *string `json:"profile,omitempty"`
+	MaxOutputBytes int     `json:"max_output_bytes,omitempty" jsonschema:"Default 800, range 512 to 8192. UTF-8 serialized JSON byte budget."`
 }
 type Evidence struct {
 	Artifact string `json:"artifact,omitempty"`
@@ -62,12 +62,12 @@ type ExploreResult struct {
 	Error        string               `json:"error,omitempty"`
 }
 type ResultRequest struct {
-	Log             bool   `json:"log,omitempty" jsonschema:"Retrieve a bounded reproduction.log byte range for a diagnosis or verification run."`
-	LogOffset       int    `json:"log_offset,omitempty" jsonschema:"One-based log byte offset; default 1. Continue with returned next_offset."`
-	RunID           string `json:"run_id"`
-	MaxOutputTokens int    `json:"max_output_tokens,omitempty"`
-	FindingOffset   int    `json:"finding_offset,omitempty" jsonschema:"Zero-based explore/diagnose/review finding index; use returned next_offset."`
-	Detail          bool   `json:"detail,omitempty" jsonschema:"Include investigation evidence quotes and hashes within the output budget."`
+	Log            bool   `json:"log,omitempty" jsonschema:"Retrieve a bounded reproduction.log byte range for a diagnosis or verification run."`
+	LogOffset      int    `json:"log_offset,omitempty" jsonschema:"One-based log byte offset; default 1. Continue with returned next_offset."`
+	RunID          string `json:"run_id"`
+	MaxOutputBytes int    `json:"max_output_bytes,omitempty"`
+	FindingOffset  int    `json:"finding_offset,omitempty" jsonschema:"Zero-based explore/diagnose/review finding index; use returned next_offset."`
+	Detail         bool   `json:"detail,omitempty" jsonschema:"Include investigation evidence quotes and hashes within the output budget."`
 }
 
 func outputBudget(n int) (int, error) {
@@ -75,7 +75,7 @@ func outputBudget(n int) (int, error) {
 		return 800, nil
 	}
 	if n < 512 || n > 8192 {
-		return 0, fmt.Errorf("max_output_tokens must be between 512 and 8192")
+		return 0, fmt.Errorf("max_output_bytes must be between 512 and 8192")
 	}
 	return n, nil
 }
@@ -86,7 +86,7 @@ func (a *App) investigate(ctx context.Context, in ExploreRequest, operation stri
 	if strings.TrimSpace(in.Question) == "" || len(in.Question) > 32768 {
 		return ExploreResult{}, fmt.Errorf("question must contain 1 to 32768 bytes")
 	}
-	if _, e := outputBudget(in.MaxOutputTokens); e != nil {
+	if _, e := outputBudget(in.MaxOutputBytes); e != nil {
 		return ExploreResult{}, e
 	}
 	var r store.Run
@@ -172,11 +172,18 @@ func (a *App) investigate(ctx context.Context, in ExploreRequest, operation stri
 	if operation == "diagnose" {
 		prompt += "\n" + runner.DiagnosePrompt
 	}
+	if resume && r.State == "failed" && len(r.Iterations) > 0 {
+		previous, _ := json.Marshal(r.Iterations[len(r.Iterations)-1].Error)
+		prompt += "\nRepair the previous rejected report in this same session, reusing the investigation and observations. Previous validation error (data): " + string(previous) + "\nReturn a complete valid report, not a patch. Recheck evidence only as needed."
+	}
 	prompt += reviewData
 	prompt += "\nQuestion (task data):\n" + in.Question
-	_, runErr := a.execute(ctx, &r, before, prompt, lock, resume, repro)
+	execution, runErr := a.execute(ctx, &r, before, prompt, lock, resume, repro)
+	if execution.State == "running" && runErr == nil {
+		return ExploreResult{RunID: r.ID, State: "running", Freshness: "unknown", Iteration: len(r.Iterations)}, nil
+	}
 	// Avoid reacquiring the lock through Result while it is still held here.
-	v, e := exploreView(ctx, r, ResultRequest{RunID: r.ID, MaxOutputTokens: in.MaxOutputTokens})
+	v, e := exploreView(ctx, r, ResultRequest{RunID: r.ID, MaxOutputBytes: in.MaxOutputBytes})
 	return v, errors.Join(runErr, e)
 }
 func source(root, path string) ([]byte, error) {
@@ -228,37 +235,37 @@ func parseExploration(raw, root string, logs ...string) (Exploration, error) {
 			var e error
 			if ev.Artifact != "" {
 				if ev.File != "" {
-					return v, fmt.Errorf("artifact evidence cannot also name a file")
+					return v, &citationError{fmt.Sprintf("finding %d evidence %d: artifact %q cannot also name file %q", i, j, ev.Artifact, ev.File)}
 				}
 				switch ev.Artifact {
 				case "reproduction.log":
 					if len(logs) == 0 || logs[0] == "" {
-						return v, fmt.Errorf("unknown evidence artifact")
+						return v, &citationError{fmt.Sprintf("finding %d evidence %d: artifact %q is unavailable in this run; do not cite it", i, j, ev.Artifact)}
 					}
 					b, e = os.ReadFile(logs[0])
 				case "review.diff":
 					if len(logs) < 2 || logs[1] == "" {
-						return v, fmt.Errorf("unknown evidence artifact")
+						return v, &citationError{fmt.Sprintf("finding %d evidence %d: artifact %q is unavailable in this run; do not cite it", i, j, ev.Artifact)}
 					}
 					b = []byte(logs[1])
 				default:
-					return v, fmt.Errorf("unknown evidence artifact")
+					return v, &citationError{fmt.Sprintf("finding %d evidence %d: unknown evidence artifact %q; only supplied reproduction.log or review.diff artifacts are supported", i, j, ev.Artifact)}
 				}
 			} else {
 				b, e = source(root, ev.File)
 			}
 			if e != nil {
-				return v, fmt.Errorf("invalid evidence file: %w", e)
+				return v, &citationError{fmt.Sprintf("finding %d evidence %d (%s:%d): invalid evidence file: %v", i, j, ev.File+ev.Artifact, ev.Line, e)}
 			}
 			lines := strings.Split(string(b), "\n")
 			if ev.EndLine == 0 {
 				ev.EndLine = ev.Line
 			}
 			if ev.Line < 1 || ev.EndLine < ev.Line || ev.EndLine > len(lines) || ev.EndLine-ev.Line > 100 {
-				return v, fmt.Errorf("invalid evidence line range")
+				return v, &citationError{fmt.Sprintf("finding %d evidence %d (%s%s:%d-%d): invalid evidence line range", i, j, ev.File, ev.Artifact, ev.Line, ev.EndLine)}
 			}
 			if ev.Quote == "" || len(ev.Quote) > 4000 || !strings.Contains(strings.Join(lines[ev.Line-1:ev.EndLine], "\n"), ev.Quote) {
-				return v, fmt.Errorf("evidence quote does not match cited source lines")
+				return v, &citationError{fmt.Sprintf("finding %d evidence %d (%s%s:%d-%d): evidence quote does not match cited source lines", i, j, ev.File, ev.Artifact, ev.Line, ev.EndLine)}
 			}
 			hash := sha256.Sum256(b)
 			ev.SHA = hex.EncodeToString(hash[:])
@@ -287,10 +294,18 @@ func exploreFreshness(ctx context.Context, r store.Run) string {
 	}
 	var report Exploration
 	if json.Unmarshal([]byte(it.Result.Report), &report) != nil {
+		if r.State == "failed" {
+			return "current"
+		}
 		return "unknown"
 	}
 	for _, f := range report.Findings {
 		for _, ev := range f.Evidence {
+			// Failed legacy/unvalidated reports have no trusted evidence hash.
+			// Repository fingerprints still gate repair; this does not validate conclusions.
+			if r.State == "failed" && ev.SHA == "" {
+				continue
+			}
 			var b []byte
 			var e error
 			if ev.Artifact != "" {
@@ -326,7 +341,7 @@ func clip(s string, n int) string {
 	return s[:n] + "…"
 }
 func exploreView(ctx context.Context, r store.Run, in ResultRequest) (ExploreResult, error) {
-	budget, e := outputBudget(in.MaxOutputTokens)
+	budget, e := outputBudget(in.MaxOutputBytes)
 	if e != nil {
 		return ExploreResult{}, e
 	}
@@ -343,7 +358,21 @@ func exploreView(ctx context.Context, r store.Run, in ResultRequest) (ExploreRes
 		v.Reproduction = &ReproductionSummary{it.Reproduction.Status, it.Reproduction.Exit, it.Reproduction.LogTruncated}
 	}
 	if r.State != "completed" {
-		v.Error = clip(it.Error, 120)
+		v.Error = it.Error
+		if len(it.Result.Failures) > 0 {
+			v.Error = runner.ErrorDetail(it.Result.Failures[0])
+		}
+		for {
+			b, _ := json.Marshal(v)
+			if len(b) <= budget || v.Error == "" {
+				break
+			}
+			v.Error = clip(v.Error, len(v.Error)/2)
+			v.Truncated = true
+			if len(v.Error) <= 3 {
+				v.Error = ""
+			}
+		}
 		return v, nil
 	}
 	var report Exploration
@@ -414,7 +443,7 @@ func (a *App) QueryResult(ctx context.Context, in ResultRequest) (any, error) {
 		if e != nil {
 			return nil, e
 		}
-		return verifyView(ctx, r, in.MaxOutputTokens)
+		return verifyView(ctx, r, in.MaxOutputBytes)
 	}
 	if !investigation(r.Operation) {
 		return a.Result(in.RunID)
@@ -441,13 +470,23 @@ func (a *App) Status(ctx context.Context, id string) (any, error) {
 		}
 		fresh = exploreFreshness(ctx, r)
 	}
+	r, err := a.Store.Get(id)
+	if err != nil {
+		return nil, err
+	}
+	phase := r.Phase
+	if r.State != "running" {
+		phase = r.State
+	}
 	return struct {
-		RunID      string     `json:"run_id"`
-		State      string     `json:"state"`
-		Operation  string     `json:"operation"`
-		Iterations int        `json:"iteration_count"`
-		Started    time.Time  `json:"started_at"`
-		Finished   *time.Time `json:"finished_at"`
-		Freshness  string     `json:"freshness,omitempty"`
-	}{v.RunID, v.State, v.Operation, v.Iterations, v.Started, v.Finished, fresh}, nil
+		Phase        string     `json:"phase,omitempty"`
+		LastProgress *time.Time `json:"last_progress,omitempty"`
+		RunID        string     `json:"run_id"`
+		State        string     `json:"state"`
+		Operation    string     `json:"operation"`
+		Iterations   int        `json:"iteration_count"`
+		Started      time.Time  `json:"started_at"`
+		Finished     *time.Time `json:"finished_at"`
+		Freshness    string     `json:"freshness,omitempty"`
+	}{phase, r.LastProgress, v.RunID, v.State, v.Operation, v.Iterations, v.Started, v.Finished, fresh}, nil
 }

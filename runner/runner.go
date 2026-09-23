@@ -203,17 +203,32 @@ func (o OpenCode) run(ctx context.Context, session string, r Request) (Result, e
 	}
 	waitErr := c.Wait()
 	out.Exit = c.ProcessState.ExitCode()
+	detail := ""
+	if len(out.Failures) > 0 {
+		detail = ErrorDetail(out.Failures[0])
+	} else {
+		detail = ErrorDetail(string(stderr.b))
+	}
+	if detail != "" && (waitErr != nil || parseErr != nil) && len(out.Failures) == 0 {
+		out.Failures = append(out.Failures, detail)
+	}
 	if parseErr != nil {
+		if detail != "" {
+			return out, fmt.Errorf("%s: %w", detail, parseErr)
+		}
 		if r.ReadOnly && out.Session == "" {
 			return out, fmt.Errorf("read-only OpenCode sandbox failed; check bubblewrap/user namespaces and OpenCode --pure support: %w", parseErr)
 		}
 		return out, parseErr
 	}
 	if waitErr != nil {
+		if detail != "" {
+			return out, fmt.Errorf("%s (OpenCode exit %d, session %s): %w", detail, out.Exit, out.Session, waitErr)
+		}
 		return out, fmt.Errorf("OpenCode exit %d (inspect session %s): %w", out.Exit, out.Session, waitErr)
 	}
 	if len(out.Failures) > 0 {
-		return out, fmt.Errorf("OpenCode reported errors")
+		return out, fmt.Errorf("OpenCode: %s", detail)
 	}
 	if out.Session == "" {
 		return out, fmt.Errorf("OpenCode returned no session ID; verify JSON CLI compatibility")

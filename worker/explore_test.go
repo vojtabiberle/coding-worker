@@ -36,7 +36,7 @@ func TestExploreFollowupAndFreshness(t *testing.T) {
 	if len(b) > 800 || v.Freshness != "current" || len(v.Findings) == 0 {
 		t.Fatalf("%s", b)
 	}
-	got, e := a.QueryResult(ctx, ResultRequest{RunID: v.RunID, Detail: true, MaxOutputTokens: 8192})
+	got, e := a.QueryResult(ctx, ResultRequest{RunID: v.RunID, Detail: true, MaxOutputBytes: 8192})
 	if e != nil {
 		t.Fatal(e)
 	}

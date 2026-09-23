@@ -2,9 +2,9 @@
 
 Shared local coding worker for Codex, Claude Code, and other MCP clients. OpenCode implements, explores, diagnoses, and reviews code; deterministic verification runs explicit checks without a model. The calling orchestrator owns architecture, review, and acceptance. Switching worker models requires no MCP client changes.
 
-See [future version ideas](ROADMAP.md) for task-aware routing, remote execution, review integration, asynchronous execution, and repository check discovery.
+See [future version ideas](ROADMAP.md) for task-aware routing, remote execution, review integration, explicit cancellation, and repository check discovery.
 
-The optional [coding-worker skill](skills/coding-worker/SKILL.md) guides tool selection, compact investigation results, implementation delegation, independent validation, correction rounds, and external acceptance. Install its folder into `~/.codex/skills/coding-worker/` and invoke it as `$coding-worker`. The MCP server remains usable without the skill.
+The optional [coding-worker skill](skills/coding-worker/SKILL.md) guides tool selection, compact investigation results, implementation delegation, independent validation, correction rounds, and external acceptance. `make install` updates both binaries and the skill; use `make install-skill` to update only the skill. Invoke it as `$coding-worker`. The MCP server remains usable without the skill.
 
 ## Install
 
@@ -12,10 +12,26 @@ Requires Linux or macOS, Go 1.26+, a C compiler for SQLite, Git, and OpenCode on
 
 ```sh
 make test
-make install                         # ~/.local/bin
+make install                         # binaries + Codex skill
 # or: make install PREFIX=/usr/local
 export PATH="$HOME/.local/bin:$PATH"
 ```
+
+Skill installation defaults to `$CODEX_HOME/skills/coding-worker` when `CODEX_HOME` is set, otherwise `~/.codex/skills/coding-worker`. Repeated installation replaces the bundled `SKILL.md`; make persistent edits in this repository's source, not the installed copy. Unrelated destination files are preserved.
+
+The same installer works with another client's skill directory:
+
+```sh
+make install-skill                         # Codex, no build required
+make install-skill SKILLS_DIR="$HOME/.claude/skills"  # Claude Code
+make install-skill SKILLS_DIR="$HOME/.agents/skills"  # clients supporting this shared directory
+make install-skill SKILLS_DIR="/path/to/agent/skills" # any other agent
+make install-bin                           # binaries only
+```
+
+`SKILLS_DIR` is the parent skills directory: the installer creates or updates `coding-worker/SKILL.md` inside it. Choose a directory your agent actually scans; `~/.agents/skills` is not automatically discovered by every client. The skill uses the same coding-worker MCP tools regardless of its installation directory; configure the MCP connection in each agent separately.
+
+`PREFIX` controls binaries; `SKILLS_DIR` controls skills independently. It also works with `make install SKILLS_DIR="/path/to/agent/skills"` to install binaries and the skill together. The installed Codex skill is available on the next turn. Updating the skill does not refresh an existing MCP connection: reconnect after updating the server binary to load its current tools and schemas.
 
 Configure OpenCode's provider credentials separately (`opencode auth login`). Check available models with `opencode models`, and agents with `opencode agent list`. This implementation was checked against local OpenCode **1.18.31** and current official CLI documentation. No live model call is part of normal tests.
 
@@ -89,11 +105,13 @@ Equivalent server entry inside `mcpServers` (user scope is stored in `~/.claude.
 }
 ```
 
-Set client execution timeouts appropriately; cancellation kills the OpenCode process group and finalizes the run as cancelled. Each client launches a small stdio server; these processes share the same database and locks. No daemon or listening port is needed. MCP stdout contains protocol messages only; structured lifecycle logs go to stderr.
+MCP execution tools return after validation, repository capture, persistence and scheduling, before model/command completion. Request cancellation after acceptance does not cancel the background job. Stopping the stdio server cancels its active process groups and waits for final persistence. Each client launches a small stdio server; these processes share the same database and locks. No daemon or listening port is needed. MCP stdout contains protocol messages only; structured lifecycle logs go to stderr.
 
 ### Tools
 
-| Tool | Returns | Execution and continuation |
+Execution tools first return a `run_id` acknowledgement. The table describes their final stored results, retrieved through `worker_result`.
+
+| Tool | Final result / response | Execution and continuation |
 | --- | --- | --- |
 | `worker_implement` | Run/session IDs, workspace/profile, latest iteration, change summary, reported checks, metrics and reviews | Writes code; new absolute `cwd` and `objective`; no commit/push |
 | `worker_continue` | Updated implementation result | Same implementation session with `run_id` and `feedback`; rejects repository drift |
@@ -101,13 +119,13 @@ Set client execution timeouts appropriately; cancellation kills the OpenCode pro
 | `worker_diagnose` | Cause status, reproduction assessment, proposed minimal fix, source/log evidence | Optional explicit reproduction command; same-session follow-up; no fix applied |
 | `worker_verify` | Check outcome, exit status, duration, bounded log excerpt and freshness | One explicit command per new run, no model; no session continuation |
 | `worker_review` | Findings with severity, reason and source/diff evidence | Read-only working-tree review against HEAD; includes untracked files; same-session follow-up |
-| `worker_status` | Run ID, state, operation, iteration count, timestamps and applicable freshness | No report or full logs; does not rerun work |
+| `worker_status` | Run ID, state, operation, iteration count, timestamps, phase/last_progress and applicable freshness | No report or full logs; does not rerun work |
 | `worker_result` | Stored implementation result, investigation findings, verification summary or log page | Does not rerun work; `detail`/`finding_offset` for findings, `log`/`log_offset` for diagnosis/verification logs |
 | `worker_record_review` | `recorded: true` on success | Records an external verdict: `accepted`, `changes_requested`, or `rejected` |
 
-Investigation and verification responses default to a conservative **800 UTF-8 JSON byte** budget (`max_output_tokens`, range 512–8192), with one text payload and no duplicated structured report. This budget does not apply to implementation results. Finding pagination uses `more`/`next_offset`; log pagination uses one-based byte offsets and `next_offset`. Complete validated reports stay in SQLite; retained command logs stay in private files (8 MiB cap, truncation flagged).
+Investigation and verification responses default to a conservative **800 UTF-8 JSON byte** budget (`max_output_bytes`, range 512–8192), with one text payload and no duplicated structured report. This budget does not apply to implementation results. Finding pagination uses `more`/`next_offset`; log pagination uses one-based byte offsets and `next_offset`. Complete validated reports stay in SQLite; retained command logs stay in private files (8 MiB cap, truncation flagged).
 
-New runs require absolute `cwd`. Explore/diagnose/review follow-ups omit `cwd` and `profile`, retaining the original session and model. They reject stale or unverifiable repository state. Verification always starts a new run. All calls currently execute synchronously; timeout does not establish cancellation or failure. Recover status/results before resubmitting.
+New runs require absolute `cwd`. Explore/diagnose/review follow-ups omit `cwd` and `profile`, retaining the original session and model. They reject stale or unverifiable repository state. Verification always starts a new run. Execution tools return `run_id` and `state: running`; retrieve completion with `worker_status`, then `worker_result`. Preflight (including Git capture) remains synchronous. A request timeout does not establish cancellation or failure; recover status/results before resubmitting.
 
 Explore/diagnose/review/verify require Linux and Bubblewrap. Investigations use read/glob/grep; reproduction and verification commands run with read-only host files, private writable runtime storage, and networking disabled. The inference provider retains network access. All operations share the per-worktree lock; different worktrees are independent. Explicit investigation profiles bypass implementation experiments.
 
@@ -125,7 +143,7 @@ Example implementation request:
 }
 ```
 
-Calls are synchronous; other connections can inspect active runs. Errors include a structured result with `state: "busy"` on lock contention, or a run ID when an executed run fails. Do not equate a completed execution with accepted implementation. External reviewers record acceptance.
+MCP execution calls return after scheduling; other connections can inspect active runs. Preflight errors include `state: "busy"` on lock contention. Background failures are retrieved by run ID through `worker_result`. Do not equate a completed execution with accepted implementation. External reviewers record acceptance.
 
 ## CLI
 
@@ -219,20 +237,20 @@ Tests use temporary Git repositories/worktrees, independent SQLite connections, 
 - `no session ID` / invalid JSON: verify OpenCode version, installed plugins, and JSON CLI behavior. Run `doctor`, inspect the referenced session, or enable debug for a new run.
 - Permission-rejected commands: OpenCode noninteractive runs reject permission questions. Configure narrow appropriate permissions in your normal OpenCode agent configuration.
 - MCP startup fails: use absolute executable path, ensure OpenCode is in the inherited PATH, and make global config readable/data directory writable.
-- Tool timeout: increase the client timeout. Inspect the cancelled run before retrying; partial edits are preserved.
+- Tool timeout: inspect the known run before retrying. Accepted MCP jobs continue independently of request cancellation; shutting down their server cancels them. Partial implementation edits are preserved.
 - SQLite busy/I/O errors: all clients must share local durable storage; avoid network filesystems. Disk/persistence errors fail the request visibly.
 
 Documentation checked before implementation: [OpenCode CLI](https://opencode.ai/docs/cli/), [runtime config](https://opencode.ai/docs/config/), [agent steps](https://opencode.ai/docs/agents/), [Codex MCP](https://developers.openai.com/codex/mcp), [Claude Code MCP](https://code.claude.com/docs/en/mcp). OpenCode's CLI source was also checked for stdin prompts, session IDs, and JSON event shapes.
 
 ## Read-only exploration
 
-`worker_explore` answers a focused repository question without implementing changes. It is currently synchronous and requires **Linux, Bubblewrap (`bwrap`), working user namespaces, and OpenCode with `--pure` support**. Implementation commands retain their previous platform support. Unsupported exploration environments fail closed; there is no unsandboxed fallback.
+`worker_explore` answers a focused repository question without implementing changes. It runs asynchronously through MCP and requires **Linux, Bubblewrap (`bwrap`), working user namespaces, and OpenCode with `--pure` support**. Implementation commands retain their previous platform support. Unsupported exploration environments fail closed; there is no unsandboxed fallback.
 
 ```json
 {
   "cwd": "/home/YOU/git/project-worktree",
   "question": "Explore the keypress → PTY → rendering path. Find possible latency sources. Change nothing.",
-  "max_output_tokens": 800
+  "max_output_bytes": 800
 }
 ```
 
@@ -244,7 +262,7 @@ A worktree lock is held for the whole investigation, excluding other coding-work
 
 The response separates `fact`, `hypothesis`, and `unverified` findings. Facts and hypotheses require `file`, `line`, `end_line`, and an exact source quote; the wrapper checks quotes against the cited lines and records file hashes. Matching a quote verifies the citation, **not the model's interpretation of it**. Unverified findings explain missing evidence. Malformed reports and unsupported citations fail visibly rather than becoming accepted facts.
 
-Responses default to an 800-unit conservative budget, enforced on the UTF-8 serialized JSON payload at the MCP boundary. One budget unit allows one byte, conservatively bounding token use without choosing a provider-specific tokenizer. This can be considerably shorter than 800 actual model tokens. Accepted budgets: 512–8192. Only one text JSON payload is emitted, avoiding duplicate text/structured reports. `truncated` identifies shortened content; `more` and `next_offset` paginate findings. If a finding cannot fit, the offset does not advance: request a larger budget or the summary form.
+Responses default to an 800-byte budget, enforced on the UTF-8 serialized JSON payload at the MCP boundary. Use `max_output_bytes`; this replaces the misleading `max_output_tokens` parameter. Accepted budgets: 512–8192. Only one text JSON payload is emitted, avoiding duplicate text/structured reports. `truncated` identifies shortened content; `more` and `next_offset` paginate findings. If a finding cannot fit, the offset does not advance: request a larger budget or the summary form.
 
 Ask a follow-up using the same run/session:
 
@@ -257,12 +275,12 @@ Omit `cwd` and `profile` on follow-up. `worker_continue` remains implementation-
 `worker_status` now returns compact metadata for all runs, without reports. `worker_result` preserves implementation results and returns bounded exploration findings. To fetch citations and longer text without rerunning the model:
 
 ```json
-{"run_id":"RUN_ID","detail":true,"finding_offset":0,"max_output_tokens":4096}
+{"run_id":"RUN_ID","detail":true,"finding_offset":0,"max_output_bytes":4096}
 ```
 
 Full validated exploration reports remain in SQLite iteration records. Freshness is `current`, `stale`, or `unknown`, based on worktree identity, HEAD/branch, index, tracked changes, untracked content, and hashes of cited files (including cited ignored files). It does not cover uncited ignored files, external dependencies, or runtime environment changes. Old source locations always refer to the recorded state. Running or unavailable worktrees return unknown freshness; results changed during exploration are stale.
 
-Explorations are excluded from implementation experiment assignments. A timeout does not prove that a run succeeded or failed: retrieve status by a known run ID, or identify it through `workerctl sessions` before retrying. This version does not yet return a run ID asynchronously before execution.
+Explorations are excluded from implementation experiment assignments. A timeout does not prove that a run succeeded or failed: retrieve status by a known run ID, or identify it through `workerctl sessions` before retrying. MCP returns the persisted run ID before model execution finishes; CLI commands remain synchronous.
 
 Additional verification without paid inference:
 
@@ -283,7 +301,7 @@ Normal tests use a fake engine/executable and exercise source evidence, follow-u
   "question": "Why does the parser fail on an empty response? Expected an empty result; observed a panic.",
   "reproduction_command": ["go", "test", "./parser", "-run", "TestEmptyResponse", "-count=1"],
   "timeout_seconds": 30,
-  "max_output_tokens": 800
+  "max_output_bytes": 800
 }
 ```
 
@@ -300,10 +318,10 @@ Combined stdout/stderr is stored privately under the worker data directory, outs
 Retrieve bounded log ranges through `worker_result`:
 
 ```json
-{"run_id":"RUN_ID","log":true,"log_offset":1,"max_output_tokens":4096}
+{"run_id":"RUN_ID","log":true,"log_offset":1,"max_output_bytes":4096}
 ```
 
-`log_offset` is a one-based **byte** offset. Follow the returned `next_offset` while `more` is true. There is no arbitrary file-path input. The payload stays within the requested conservative byte/token budget. Logs can contain sensitive command output; they remain private and have no automatic retention policy.
+`log_offset` is a one-based **byte** offset. Follow the returned `next_offset` while `more` is true. There is no arbitrary file-path input. The payload stays within the requested byte budget. Logs can contain sensitive command output; they remain private and have no automatic retention policy.
 
 Follow up with `worker_diagnose` using the same `run_id` and a new `question`. Omitting `reproduction_command` reuses the previous observation without rerunning it; supplying a command executes a new attempt. Source drift requires a new run. Log retrieval selects the latest observation (which may have been reused); older attempts remain in SQLite iteration records and private log files. `worker_explore` and `worker_continue` do not resume diagnosis runs. Diagnoses do not participate in implementation experiment assignments.
 
@@ -312,14 +330,14 @@ Follow up with `worker_diagnose` using the same `run_id` and a new `question`. O
 `worker_verify` executes one explicit check command per run, without OpenCode or model configuration:
 
 ```json
-{"cwd":"/absolute/repo","command":["npm","test","--","--runInBand"],"timeout_seconds":120,"max_output_tokens":800}
+{"cwd":"/absolute/repo","command":["npm","test","--","--runInBand"],"timeout_seconds":120,"max_output_bytes":800}
 ```
 
 Use a repository check script to combine checks, ensuring it propagates failures. The worker reports observed `passed` (exit 0), `failed` (nonzero exit), `timed_out`, `cancelled`, or `start_failed`; exit 0 alone does not establish test coverage or correctness. Run `state` describes execution/persistence, separately from check `outcome`.
 
 Linux and Bubblewrap are required. Commands use the diagnosis sandbox: filesystem read-only except private temporary storage, network disabled, minimal environment, timeout default 30/max 120 seconds. Checks writing build output into the repository will fail; configure their output/cache into `$TMPDIR` through an explicitly invoked shell where supported. Dependencies must already be present. No automatic check discovery or writable worktree copy is provided.
 
-Responses include elapsed time, repository fingerprint/freshness, and a bounded log excerpt with line number. `worker_status` stays compact; `worker_result` retrieves the summary, or `log:true` with `log_offset` retrieves log pages. Logs retain up to 8 MiB; excess output is drained and `log_truncated` is set. The default budget is 800 conservative UTF-8 bytes (512–8192). `truncated` marks shortened excerpts. Full retained logs and original argv remain in local run artifacts. Freshness covers Git state including dirty/untracked files, not ignored dependencies or environment changes.
+Responses include elapsed time, repository fingerprint/freshness, and a bounded log excerpt with line number. `worker_status` stays compact; `worker_result` retrieves the summary, or `log:true` with `log_offset` retrieves log pages. Logs retain up to 8 MiB; excess output is drained and `log_truncated` is set. The default budget is 800 conservative UTF-8 bytes (512–8192). `truncated` marks shortened excerpts or error messages. Full retained logs and original argv remain in local run artifacts. Freshness covers Git state including dirty/untracked files, not ignored dependencies or environment changes.
 
 Every call starts a new run; reading status/results never reruns checks. Verification does not participate in model experiments and cannot be resumed through `worker_continue`.
 
@@ -342,3 +360,40 @@ The initial scope is the final working tree versus `HEAD`, not a branch/base-ref
 User-reported implementation feedback described two repaired output-reading bugs with regression tests, but also premature completion, missed daemon/concurrency concerns, and an unchecked TypeScript build after corrections. Three implementation/review rounds were needed; final tests and build were checked independently. This is qualitative feedback, not a model-ranking experiment.
 
 Keep tasks bounded with precise acceptance criteria. Check process ownership, cancellation, lock lifetime and cleanup when relevant; report tests, build and type checks separately. One reported MCP timeout occurred after 300 seconds while a result remained retrievable; that does not establish cancellation behavior. Retrieve known runs before retrying. The previously unclear review verdict is now documented and validated as `accepted`, not `approved`.
+
+## MCP execution lifecycle and migration
+
+Reconnect MCP clients after installing the updated binary so `tools/list` and parameter schemas refresh. There are nine tools. Update requests from `max_output_tokens` to `max_output_bytes`; the old name is no longer advertised or supported. Read final reports with `worker_result` after status leaves `running`; the initial response is only an acknowledgement.
+
+Example MCP sequence (tool names identify separate calls):
+
+```text
+worker_explore {"cwd":"/absolute/repo","question":"Where is input polling scheduled?"}
+→ {"run_id":"RUN_ID","state":"running", ...}
+
+worker_status {"run_id":"RUN_ID"}
+→ {"state":"running","phase":"model","last_progress":"...", ...}
+
+# After state becomes completed, failed, cancelled or interrupted:
+worker_result {"run_id":"RUN_ID","max_output_bytes":4096}
+```
+
+Poll status at reasonable intervals instead of resubmitting the execution request. A failed run can still have useful error details. If the error is marked `truncated:true`, retry **result retrieval**, for example with `max_output_bytes:8192`; this does not rerun the model or command.
+
+Jobs belong to their stdio server process, not to a persistent daemon. Graceful disconnect/shutdown cancels and joins active jobs before closing SQLite. Abrupt process death leaves runs recoverable as interrupted once their worktree lock is released. Other clients sharing the data directory can inspect stored state. Request cancellation alone does not cancel an accepted job. There is no dedicated cancel tool yet.
+
+OpenCode failure responses prefer the actual provider error message, then bounded stderr when available. For example, `stream_inactivity_timeout` can mean the upstream model sent no data for 300 seconds; increasing the MCP timeout alone does not fix that provider failure. Stored historical failure events are also summarized by `worker_result`.
+
+## Citation correction, errors and progress
+
+For explore/diagnose/review, an invalid source file, artifact reference, line range, quote or diagnosis contract triggers at most one corrective model call in the same session, provided repository state is unchanged and a session exists. Errors identify the zero-based finding/evidence indices and source location or artifact name. Unknown artifact names are distinguished from supported artifacts unavailable in that run. The worker asks for a complete corrected report and validates it again; a second invalid report fails. Reproduction commands are not rerun. The original attempt remains in the iteration's `citation_attempt`; reported metrics sum both calls when both values are known. This can add one model call's latency and cost. Unparseable JSON and provider errors do not trigger this retry. Diagnosis contract errors, including unsupported claims of a proven cause, share the same single corrective-attempt budget with citation errors.
+
+`worker_status` includes `phase` and `last_progress`. Phases include queued, reproducing, checking, model, validating, correcting_citations and correcting_report; terminal runs report their final state. The timestamp records phase transitions, not a heartbeat or a percentage estimate. Old runs may lack progress metadata.
+
+Errors use the requested byte budget rather than a fixed character cap. `truncated:true` marks shortened error text; increase `max_output_bytes` (up to 8192) to retrieve longer errors without rerunning work. Errors exceeding even that payload budget remain marked truncated; complete stored errors remain in local run records.
+
+Diagnosis only advertises `reproduction.log` when a log actually exists. Without a reproduction command (or when startup fails before log creation), observation metadata has no `log_path`. That JSON metadata is not log content and cannot serve as a log citation. Static diagnoses describe missing runtime evidence in `reproduction_assessment` or an unverified finding with empty evidence; they cannot claim a reproduced or supported cause.
+
+A rejected investigation report can be repaired with the same tool's `run_id` and a corrective `question`; no new run or session is required. The model receives the prior validation error and retained context. Validated citation hashes are saved even when diagnosis semantics are rejected. For historical failed reports lacking validated hashes (or readable JSON), repair eligibility uses the stored before/after and current repository fingerprints; absent hashes are not evidence of drift. Existing stored hashes are still checked. Unhashed ignored inputs cannot be revalidated historically. `freshness:current` on a failed run describes repository state, not valid conclusions. Real repository changes still reject continuation.
+
+For static diagnosis, source facts may be verified, but `cause_status:supported` requires an observed reproduction with source and log facts. A source guard suggesting a bug is fixed or unreachable still requires `hypothesis` or `unverified` and `reproduced:false` until runtime confirmation exists. The harness repeats these constraints alongside observations and on a corrective attempt.

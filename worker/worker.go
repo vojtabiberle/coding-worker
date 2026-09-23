@@ -18,6 +18,7 @@ import (
 )
 
 type App struct {
+	jobs       jobs
 	ConfigPath string
 	Store      *store.Store
 	Engine     runner.Engine
@@ -160,6 +161,8 @@ func (a *App) execute(ctx context.Context, r *store.Run, before workspace.Snapsh
 	i := store.Iteration{Number: len(r.Iterations) + 1, Started: time.Now().UTC(), Before: before}
 	r.Iterations = append(r.Iterations, i)
 	r.State = "running"
+	r.Phase = "queued"
+	r.LastProgress = &i.Started
 	r.Finished = nil
 	if e := a.Store.Save(r); e != nil {
 		return Result{}, e
@@ -173,6 +176,23 @@ func (a *App) execute(ctx context.Context, r *store.Run, before workspace.Snapsh
 	req.Review = r.Operation == "review"
 	req.Reproduction = repro
 	req.ReproductionDir = filepath.Join(a.Store.Dir, "reproductions", r.ID, fmt.Sprint(len(r.Iterations)))
+	if ctx.Value(asyncKey{}) == true {
+		copyRun := *r
+		copyRun.Iterations = append([]store.Iteration(nil), r.Iterations...)
+		e := a.launch(lock, func(jobCtx context.Context, held *os.File) {
+			req.Lock = held
+			_, err := a.invoke(jobCtx, &copyRun, req, resume)
+			if err != nil {
+				slog.Error("background run failed", "run_id", copyRun.ID, "error", err)
+			}
+		})
+		if e != nil {
+			r.State = "failed"
+			r.Iterations[len(r.Iterations)-1].Error = e.Error()
+			return Result{RunID: r.ID, State: r.State}, errors.Join(e, a.Store.Save(r))
+		}
+		return Result{RunID: r.ID, Operation: r.Operation, State: "running"}, nil
+	}
 	return a.invoke(ctx, r, req, resume)
 }
 func (a *App) invoke(ctx context.Context, r *store.Run, req runner.Request, resume bool) (Result, error) {
@@ -184,8 +204,9 @@ func (a *App) invoke(ctx context.Context, r *store.Run, req runner.Request, resu
 	var result runner.Result
 	var runErr error
 	if req.Reproduction != nil {
+		runErr = a.phase(r, "reproducing")
 		observation := runner.Reproduction{Status: "not_run"}
-		if len(req.Reproduction.Command) > 0 {
+		if runErr == nil && len(req.Reproduction.Command) > 0 {
 			observation, runErr = runner.Reproduce(ctx, req)
 		} else if idx > 0 && r.Iterations[idx-1].Reproduction != nil {
 			observation = *r.Iterations[idx-1].Reproduction
@@ -199,12 +220,21 @@ func (a *App) invoke(ctx context.Context, r *store.Run, req runner.Request, resu
 			runErr = errors.Join(runErr, ctx.Err())
 		}
 	}
+	if runErr == nil {
+		runErr = a.phase(r, "model")
+	}
 	if runErr != nil {
 		result.Exit = -1
 	} else if resume {
 		result, runErr = a.Engine.Continue(ctx, r.Session, req)
 	} else {
 		result, runErr = a.Engine.Start(ctx, req)
+	}
+	if investigation(r.Operation) && runErr == nil {
+		runErr = a.phase(r, "validating")
+		if runErr == nil {
+			result, runErr = a.repairCitation(ctx, r, req, result)
+		}
 	}
 	now := time.Now().UTC()
 	r.Finished = &now
@@ -236,6 +266,10 @@ func (a *App) invoke(ctx context.Context, r *store.Run, req runner.Request, resu
 			diff = i.Before.Diff
 		}
 		report, err := parseExploration(result.Report, r.Workspace.Root, logPath, diff)
+		if err == nil {
+			b, _ := json.Marshal(report)
+			i.Result.Report = string(b)
+		}
 		if err == nil && r.Operation == "review" {
 			err = validateCodeReview(report, i.Before)
 		}

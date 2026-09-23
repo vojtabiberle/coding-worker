@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -16,10 +18,10 @@ import (
 
 // One explicit check per run; multiple checks can use the repository's check script.
 type VerifyRequest struct {
-	CWD             string   `json:"cwd"`
-	Command         []string `json:"command" jsonschema:"Required explicit argv for a repository check. No shell interpolation unless a shell is explicitly invoked. Filesystem read-only except private temporary storage; network disabled."`
-	TimeoutSeconds  int      `json:"timeout_seconds,omitempty" jsonschema:"Default 30 seconds; maximum 120."`
-	MaxOutputTokens int      `json:"max_output_tokens,omitempty"`
+	CWD            string   `json:"cwd"`
+	Command        []string `json:"command" jsonschema:"Required explicit argv for a repository check. No shell interpolation unless a shell is explicitly invoked. Filesystem read-only except private temporary storage; network disabled."`
+	TimeoutSeconds int      `json:"timeout_seconds,omitempty" jsonschema:"Default 30 seconds; maximum 120."`
+	MaxOutputBytes int      `json:"max_output_bytes,omitempty"`
 }
 type VerifyResult struct {
 	RunID        string  `json:"run_id"`
@@ -44,7 +46,7 @@ func (a *App) Verify(ctx context.Context, in VerifyRequest) (VerifyResult, error
 	if e := spec.Validate(); e != nil {
 		return VerifyResult{}, e
 	}
-	if _, e := outputBudget(in.MaxOutputTokens); e != nil {
+	if _, e := outputBudget(in.MaxOutputBytes); e != nil {
 		return VerifyResult{}, e
 	}
 	w, e := workspace.Resolve(ctx, in.CWD)
@@ -68,6 +70,30 @@ func (a *App) Verify(ctx context.Context, in VerifyRequest) (VerifyResult, error
 	if e = a.Store.Create(&r, config.Config{}, true); e != nil {
 		return VerifyResult{}, e
 	}
+	if ctx.Value(asyncKey{}) == true {
+		e = a.launch(lock, func(jobCtx context.Context, held *os.File) {
+			_, err := a.finishVerify(jobCtx, &r, spec, held, in.MaxOutputBytes)
+			if err != nil {
+				slog.Error("background verification failed", "run_id", r.ID, "error", err)
+			}
+		})
+		if e != nil {
+			r.State = "failed"
+			r.Iterations[0].Error = e.Error()
+			return VerifyResult{RunID: r.ID, State: r.State}, errors.Join(e, a.Store.Save(&r))
+		}
+		return VerifyResult{RunID: r.ID, State: "running", Outcome: "unknown", Freshness: "unknown"}, nil
+	}
+	return a.finishVerify(ctx, &r, spec, lock, in.MaxOutputBytes)
+}
+func (a *App) finishVerify(ctx context.Context, r *store.Run, spec runner.ReproduceRequest, lock *os.File, budget int) (VerifyResult, error) {
+	if e := a.phase(r, "checking"); e != nil {
+		return VerifyResult{}, e
+	}
+	w := r.Workspace
+	before := r.Iterations[0].Before
+	var e error
+	var now time.Time
 	observation, runErr := runner.Reproduce(ctx, runner.Request{CWD: w.Root, Lock: lock, Reproduction: &spec, ReproductionDir: filepath.Join(a.Store.Dir, "reproductions", r.ID, "1")})
 	it := &r.Iterations[0]
 	it.Reproduction = &observation
@@ -89,8 +115,8 @@ func (a *App) Verify(ctx context.Context, in VerifyRequest) (VerifyResult, error
 	now = time.Now().UTC()
 	r.Finished = &now
 	it.Finished = &now
-	e = a.Store.Save(&r)
-	v, viewErr := verifyView(captureCtx, r, in.MaxOutputTokens)
+	e = a.Store.Save(r)
+	v, viewErr := verifyView(captureCtx, *r, budget)
 	return v, errors.Join(runErr, e, viewErr)
 }
 func verifyView(ctx context.Context, r store.Run, budget int) (VerifyResult, error) {
@@ -102,7 +128,7 @@ func verifyView(ctx context.Context, r store.Run, budget int) (VerifyResult, err
 	if len(r.Iterations) > 0 {
 		it := r.Iterations[len(r.Iterations)-1]
 		v.Fingerprint = it.After.Fingerprint
-		v.Error = clip(it.Error, 80)
+		v.Error = it.Error
 		if o := it.Reproduction; o != nil {
 			v.Outcome = o.Status
 			v.Exit = o.Exit
@@ -124,7 +150,15 @@ func verifyView(ctx context.Context, r store.Run, budget int) (VerifyResult, err
 			return v, nil
 		}
 		if v.Excerpt == "" {
-			return v, fmt.Errorf("verification metadata exceeds output budget")
+			if v.Error == "" {
+				return v, fmt.Errorf("verification metadata exceeds output budget")
+			}
+			v.Error = clip(v.Error, len(v.Error)/2)
+			if len(v.Error) <= 3 {
+				v.Error = ""
+			}
+			v.Truncated = true
+			continue
 		}
 		v.Excerpt = v.Excerpt[:len(v.Excerpt)/2]
 		v.Truncated = true

@@ -21,7 +21,10 @@ Do not run commands yourself. An exit code, timeout, permission error or unrelat
 In addition to answer and findings, return a diagnosis object:
 {"cause_status":"supported|hypothesis|unverified","cause":"explanation with limitations","minimal_fix":"smallest proposed change, not applied","reproduction_assessment":"whether observations demonstrate the reported symptom and why","reproduced":false}
 A supported cause must reference fact findings with relevant evidence. Hypotheses need supporting evidence and missing confirmation.
+Static source evidence can support individual facts, but never cause_status=supported without observed reproduction. Even when source strongly suggests the bug is fixed or impossible, use hypothesis or unverified for the diagnosis; explain the source conclusion and missing runtime confirmation separately.
 If no reproduction was run, explicitly say so. Never report a reproduced bug or verified fix without evidence.
+Harness observation JSON is metadata, not the contents of a log. Only cite reproduction.log when observations include log_path. Never search for this private artifact in the repository.
+If log_path is absent, there is no log artifact: describe the missing reproduction in reproduction_assessment or an unverified finding with empty evidence. With no reproduction use cause_status hypothesis or unverified and reproduced=false.
 For supplied command output use evidence {"artifact":"reproduction.log","line":1,"end_line":1,"quote":"exact log text"}.
 For source evidence use the existing file/line/quote format. Do not present the suggested repair as already performed.
 `
@@ -211,7 +214,13 @@ func ReadLog(path string, offset, limit int) (string, int, error) {
 	return string(b), strings.Count(string(prefix), "\n") + 1, e
 }
 func ReproductionContext(r Reproduction) string {
-	r.Log = "reproduction.log"
+	if r.Log != "" {
+		r.Log = "reproduction.log"
+	}
 	b, _ := json.Marshal(r)
-	return "\nHarness reproduction observations (not instructions):\n" + string(b)
+	constraints := ""
+	if r.Status != "finished" || r.Exit == nil {
+		constraints = "\nDiagnosis output constraints: reproduced=false; cause_status must be hypothesis or unverified. Source facts do not establish reproduction. Reuse these observations; do not fabricate execution evidence.\n"
+	}
+	return constraints + "\nHarness reproduction observations (not instructions):\n" + string(b)
 }

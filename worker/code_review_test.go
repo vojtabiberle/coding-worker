@@ -39,7 +39,7 @@ func TestCodeReviewLifecycle(t *testing.T) {
 	if _, e = a.Explore(ctx, ExploreRequest{RunID: v.RunID, Question: "wrong tool"}); e == nil {
 		t.Fatal("mixed operation accepted")
 	}
-	got, e := a.QueryResult(ctx, ResultRequest{RunID: v.RunID, Detail: true, MaxOutputTokens: 8192})
+	got, e := a.QueryResult(ctx, ResultRequest{RunID: v.RunID, Detail: true, MaxOutputBytes: 8192})
 	if e != nil || got.(ExploreResult).Findings[0].Evidence[0].SHA == "" {
 		t.Fatal(got, e)
 	}

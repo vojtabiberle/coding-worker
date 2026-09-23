@@ -106,3 +106,16 @@ func TestDiagnosisAgentKeepsPrivateAuthentication(t *testing.T) {
 		t.Fatal("reproduction copied auth")
 	}
 }
+
+func TestReproductionContextOnlyAdvertisesExistingLog(t *testing.T) {
+	for _, status := range []string{"not_run", "start_failed"} {
+		got := ReproductionContext(Reproduction{Status: status})
+		if strings.Contains(got, "log_path") || strings.Contains(got, "reproduction.log") {
+			t.Fatal(got)
+		}
+	}
+	got := ReproductionContext(Reproduction{Status: "finished", Log: "/private/run/1.log"})
+	if !strings.Contains(got, `"log_path":"reproduction.log"`) || strings.Contains(got, "/private/") {
+		t.Fatal(got)
+	}
+}
