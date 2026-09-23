@@ -5,6 +5,8 @@ description: Use coding-worker MCP for bounded implementation, repository explor
 
 # Coding worker orchestration
 
+For repository tasks, select the relevant coding-worker operation by default; the user need not explicitly request delegation.
+
 Select the coding-worker operation matching the task. Keep architecture, scope decisions, independent review, and acceptance with the calling orchestrator. A completed worker run is not an accepted solution.
 
 ## Prepare the task
