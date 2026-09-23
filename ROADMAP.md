@@ -61,7 +61,7 @@ Open questions: how much command detection can be reliable, when checks should r
 
 ## Focused investigation MCP tools
 
-Extend the worker beyond implementation with compact, evidence-backed investigations. The orchestrator should receive answers and findings rather than repeated source dumps. `worker_explore` now has a first read-only implementation; the other three tools and asynchronous execution remain proposed. See README for the implemented contract and limitations.
+Extend the worker beyond implementation with compact, evidence-backed investigations. The orchestrator should receive answers and findings rather than repeated source dumps. `worker_explore` and `worker_diagnose` now have first implementations. Diagnosis executes optional caller-specified reproduction in an isolated runtime without writing the original worktree. `worker_verify`, `worker_review`, and asynchronous execution remain proposed. See README for the implemented contract and limitations.
 
 | Tool | Intended result | Execution boundary |
 | --- | --- | --- |
@@ -106,8 +106,8 @@ If inspection actually finds a 250 ms polling interval, return the relevant symb
 
 ## Suggested order
 
-1. Validate the first implemented MCP extension, `worker_explore`, in read-only mode: a focused answer with source evidence, bounded output, follow-up questions, and repository-state freshness. Prevent write-capable tools and mutating commands; a prompt saying “do not edit” alone is not a read-only boundary. Defer `worker_diagnose`, `worker_verify`, and `worker_review` until this workflow is validated.
-2. Repository check discovery and baseline results, then diagnosis, verification, and the basic review agent using the established result contract.
+1. Validate the first implemented MCP extension, `worker_explore`, in read-only mode: a focused answer with source evidence, bounded output, follow-up questions, and repository-state freshness. Prevent write-capable tools and mutating commands; a prompt saying “do not edit” alone is not a read-only boundary. Build on this contract for later tools; the next implemented tool is `worker_diagnose`.
+2. Validate diagnosis with explicit reproduction commands and evidence, then add repository check discovery, verification, and the basic review agent using the established result contract.
 3. Task-aware routing: use accumulated outcomes to evaluate selection quality.
 4. Remote execution: prototype transport and choose a synchronization contract before adding automatic change transfer.
 

@@ -102,7 +102,7 @@ func (a *App) Implement(ctx context.Context, in ImplementRequest) (Result, error
 	if e = a.Store.Create(&r, c, profile != ""); e != nil {
 		return Result{}, e
 	}
-	return a.execute(ctx, &r, before, runner.Prompt(in.Objective, in.Constraints, in.Acceptance, in.Context), lock, false)
+	return a.execute(ctx, &r, before, runner.Prompt(in.Objective, in.Constraints, in.Acceptance, in.Context), lock, false, nil)
 }
 func busy(e error) Result {
 	if errors.Is(e, workspace.ErrBusy) {
@@ -137,7 +137,7 @@ func (a *App) Continue(ctx context.Context, in ContinueRequest) (Result, error) 
 	if e != nil {
 		return Result{}, e
 	}
-	if r.Operation == "explore" {
+	if investigation(r.Operation) {
 		return Result{}, fmt.Errorf("use worker_explore with run_id for investigation follow-ups")
 	}
 	if r.Session == "" {
@@ -154,9 +154,9 @@ func (a *App) Continue(ctx context.Context, in ContinueRequest) (Result, error) 
 	if last.Fingerprint == "" || before.Fingerprint != last.Fingerprint {
 		return Result{}, fmt.Errorf("repository drift: HEAD, branch, tracked changes or untracked files changed; start a new run")
 	}
-	return a.execute(ctx, &r, before, runner.Prompt(in.Feedback, nil, in.Acceptance, "Continue the existing implementation session."), lock, true)
+	return a.execute(ctx, &r, before, runner.Prompt(in.Feedback, nil, in.Acceptance, "Continue the existing implementation session."), lock, true, nil)
 }
-func (a *App) execute(ctx context.Context, r *store.Run, before workspace.Snapshot, prompt string, lock *os.File, resume bool) (Result, error) {
+func (a *App) execute(ctx context.Context, r *store.Run, before workspace.Snapshot, prompt string, lock *os.File, resume bool, repro *runner.ReproduceRequest) (Result, error) {
 	i := store.Iteration{Number: len(r.Iterations) + 1, Started: time.Now().UTC(), Before: before}
 	r.Iterations = append(r.Iterations, i)
 	r.State = "running"
@@ -165,11 +165,13 @@ func (a *App) execute(ctx context.Context, r *store.Run, before workspace.Snapsh
 		return Result{}, e
 	}
 	req := runner.Request{CWD: r.Workspace.Root, Prompt: prompt, Profile: r.Config.Profile, Lock: lock}
-	if r.Operation == "explore" {
+	if investigation(r.Operation) {
 		req.ReadOnly = true
 		req.RuntimeDir = filepath.Join(a.Store.Dir, "explore", r.ID)
 		req.Profile.Agent = runner.ExploreAgent + "-" + r.ID
 	}
+	req.Reproduction = repro
+	req.ReproductionDir = filepath.Join(a.Store.Dir, "reproductions", r.ID, fmt.Sprint(len(r.Iterations)))
 	return a.invoke(ctx, r, req, resume)
 }
 func (a *App) invoke(ctx context.Context, r *store.Run, req runner.Request, resume bool) (Result, error) {
@@ -180,14 +182,34 @@ func (a *App) invoke(ctx context.Context, r *store.Run, req runner.Request, resu
 	slog.Info("worker started", "run_id", r.ID, "worktree", r.Workspace.Root, "profile", r.Config.Name, "model", r.Config.Profile.Model)
 	var result runner.Result
 	var runErr error
-	if resume {
+	if req.Reproduction != nil {
+		observation := runner.Reproduction{Status: "not_run"}
+		if len(req.Reproduction.Command) > 0 {
+			observation, runErr = runner.Reproduce(ctx, req)
+		} else if idx > 0 && r.Iterations[idx-1].Reproduction != nil {
+			observation = *r.Iterations[idx-1].Reproduction
+		}
+		r.Iterations[idx].Reproduction = &observation
+		if e := a.Store.Save(r); e != nil {
+			runErr = errors.Join(runErr, e)
+		}
+		req.Prompt += runner.ReproductionContext(observation)
+		if ctx.Err() != nil {
+			runErr = errors.Join(runErr, ctx.Err())
+		}
+	}
+	if runErr != nil {
+		result.Exit = -1
+	} else if resume {
 		result, runErr = a.Engine.Continue(ctx, r.Session, req)
 	} else {
 		result, runErr = a.Engine.Start(ctx, req)
 	}
 	now := time.Now().UTC()
 	r.Finished = &now
-	r.Session = result.Session
+	if result.Session != "" {
+		r.Session = result.Session
+	}
 	r.State = "completed"
 	i := &r.Iterations[idx]
 	i.Finished = &now
@@ -200,11 +222,18 @@ func (a *App) invoke(ctx context.Context, r *store.Run, req runner.Request, resu
 	if e != nil {
 		runErr = errors.Join(runErr, e)
 	}
-	if r.Operation == "explore" && after.Fingerprint != i.Before.Fingerprint {
+	if investigation(r.Operation) && after.Fingerprint != i.Before.Fingerprint {
 		runErr = errors.Join(runErr, fmt.Errorf("repository changed during exploration; conclusions are stale"))
 	}
-	if r.Operation == "explore" && runErr == nil {
-		report, err := parseExploration(result.Report, r.Workspace.Root)
+	if investigation(r.Operation) && runErr == nil {
+		logPath := ""
+		if i.Reproduction != nil {
+			logPath = i.Reproduction.Log
+		}
+		report, err := parseExploration(result.Report, r.Workspace.Root, logPath)
+		if err == nil && r.Operation == "diagnose" {
+			err = validateDiagnosis(report, i.Reproduction)
+		}
 		if err != nil {
 			runErr = err
 		} else {

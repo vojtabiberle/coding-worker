@@ -95,6 +95,7 @@ Set client execution timeouts appropriately; cancellation kills the OpenCode pro
 
 - `worker_implement`: required absolute `cwd` and `objective`; optional `constraints`, `acceptance_criteria`, `relevant_context`, `profile`, `origin`.
 - `worker_continue`: `run_id`, `feedback`, optional additional `acceptance_criteria`.
+- `worker_diagnose`: diagnosis with optional caller-specified reproduction, evidence-backed cause/hypothesis, and proposed minimal fix. See diagnosis below.
 - `worker_explore`: focused read-only investigation; new requests take absolute `cwd` and `question`, follow-ups take `run_id` and `question`. See read-only exploration below.
 - `worker_status`: `run_id`; compact execution metadata without a report.
 - `worker_result`: `run_id`; implementation result or bounded exploration findings. Raw diffs and event logs are omitted.
@@ -259,3 +260,37 @@ CODING_WORKER_CONFIG_TEST=1 go test ./runner -run TestInstalledExploreConfig -v
 ```
 
 Normal tests use a fake engine/executable and exercise source evidence, follow-up, freshness, output budgets, real Bubblewrap write denial, and cancellation. Sandbox tests skip when `bwrap` is absent; failures when it is installed should be investigated rather than treated as a passing sandbox check.
+
+## Diagnosis without applying a fix
+
+`worker_diagnose` adds a reproduction observation, a supported cause or labeled hypothesis, and a proposed minimal repair. It shares exploration's session continuation, repository freshness, compact status, source citation checks, response budget, and Linux/Bubblewrap requirement.
+
+```json
+{
+  "cwd": "/home/YOU/git/project-worktree",
+  "question": "Why does the parser fail on an empty response? Expected an empty result; observed a panic.",
+  "reproduction_command": ["go", "test", "./parser", "-run", "TestEmptyResponse", "-count=1"],
+  "timeout_seconds": 30,
+  "max_output_tokens": 800
+}
+```
+
+The harness executes the exact supplied argv once; the model cannot choose or run additional commands. Relative executable paths resolve against the worktree. Shell syntax is interpreted only when the caller explicitly supplies a shell, such as `["/bin/sh", "-c", "..."]`. Without a command, diagnosis is static and reproduction is `not_run`.
+
+Reproduction runs with the original filesystem read-only, disabled network, a minimal environment, and private writable cache/temp/state directories outside the repository. It does **not** copy the whole project or give tests a writable project checkout. Commands that require project writes, external services, additional environment variables, or unavailable dependencies may therefore fail for environmental reasons. Those failures are not proof that the reported bug was reproduced. Inference still uses provider networking in its separate sandbox; provider authentication is not copied into the reproduction runtime.
+
+Timeout defaults to 30 seconds, maximum 120. Cancellation terminates the sandbox process group; execution statuses distinguish `not_run`, `finished`, `timed_out`, `cancelled`, and `start_failed`. `finished` includes nonzero exit codes. A sandbox startup failure is detected before treating output as command observations. Filesystem/network namespaces do not make arbitrary untrusted commands safe from every possible host interaction; supply trusted repository commands.
+
+The `diagnosis` response contains `cause_status` (`supported`, `hypothesis`, `unverified`), `cause`, `minimal_fix`, `reproduction_assessment`, and `reproduced`. A claimed reproduction requires a finished command and matching log citations; a supported cause additionally requires source fact evidence. These checks validate the presence and location of evidence, not its semantic interpretation. A failing command alone does not automatically set `reproduced` or confirm a cause. No suggested fix is applied.
+
+Combined stdout/stderr is stored privately under the worker data directory, outside both the target worktree and the command's writable sandbox. Logs are capped at 8 MiB while excess output is drained; `log_truncated` records overflow. The model receives only the last 4 KiB of the retained log, with its starting line number. Source and `reproduction.log` citations are checked against stored content.
+
+Retrieve bounded log ranges through `worker_result`:
+
+```json
+{"run_id":"RUN_ID","log":true,"log_offset":1,"max_output_tokens":4096}
+```
+
+`log_offset` is a one-based **byte** offset. Follow the returned `next_offset` while `more` is true. There is no arbitrary file-path input. The payload stays within the requested conservative byte/token budget. Logs can contain sensitive command output; they remain private and have no automatic retention policy.
+
+Follow up with `worker_diagnose` using the same `run_id` and a new `question`. Omitting `reproduction_command` reuses the previous observation without rerunning it; supplying a command executes a new attempt. Source drift requires a new run. Log retrieval selects the latest observation (which may have been reused); older attempts remain in SQLite iteration records and private log files. `worker_explore` and `worker_continue` do not resume diagnosis runs. Diagnoses do not participate in implementation experiment assignments.

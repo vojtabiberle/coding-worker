@@ -42,11 +42,16 @@ func New(a *worker.App) *sdk.Server {
 		v, e := a.Explore(ctx, in)
 		return exploreResponse(v, e, in.MaxOutputTokens)
 	})
+	sdk.AddTool(s, &sdk.Tool{Name: "worker_diagnose", Description: "Diagnose a bug without applying a fix. Same cwd/question or run_id/question inputs as exploration. Optional reproduction_command is explicit argv executed once by the harness, with a read-only filesystem, no network, and timeout <=120 seconds. Model cannot execute commands. Returns evidence-backed cause or hypothesis and minimal proposed repair. Use worker_result log=true for bounded reproduction output."}, func(ctx context.Context, _ *sdk.CallToolRequest, in worker.DiagnoseRequest) (*sdk.CallToolResult, any, error) {
+		v, e := a.Diagnose(ctx, in)
+		return exploreResponse(v, e, in.MaxOutputTokens)
+	})
+
 	sdk.AddTool(s, &sdk.Tool{Name: "worker_status", Description: "Compact execution status; does not return the report. Exploration freshness is current, stale, or unknown.", Annotations: &sdk.ToolAnnotations{ReadOnlyHint: true}}, func(ctx context.Context, _ *sdk.CallToolRequest, in RunID) (*sdk.CallToolResult, any, error) {
 		v, e := a.Status(ctx, in.RunID)
 		return compactResponse(v, e)
 	})
-	sdk.AddTool(s, &sdk.Tool{Name: "worker_result", Description: "Retrieve implementation result or budgeted exploration findings. For exploration use detail=true for quotes/hashes and finding_offset to page; increase max_output_tokens if a finding cannot fit. Default 800, maximum 8192.", Annotations: &sdk.ToolAnnotations{ReadOnlyHint: true}}, func(ctx context.Context, _ *sdk.CallToolRequest, in worker.ResultRequest) (*sdk.CallToolResult, any, error) {
+	sdk.AddTool(s, &sdk.Tool{Name: "worker_result", Description: "Retrieve implementation result or budgeted exploration findings. For exploration use detail=true for quotes/hashes and finding_offset to page; increase max_output_tokens if a finding cannot fit. For diagnosis logs use log=true and log_offset (one-based byte offset). Default 800, maximum 8192.", Annotations: &sdk.ToolAnnotations{ReadOnlyHint: true}}, func(ctx context.Context, _ *sdk.CallToolRequest, in worker.ResultRequest) (*sdk.CallToolResult, any, error) {
 		v, e := a.QueryResult(ctx, in)
 		if ex, ok := v.(worker.ExploreResult); ok {
 			return exploreResponse(ex, e, in.MaxOutputTokens)
@@ -90,6 +95,7 @@ func exploreResponse(v worker.ExploreResult, e error, budget int) (*sdk.CallTool
 	b, _ := json.Marshal(v)
 	if len(b) > budget {
 		v.Answer = ""
+		v.Diagnosis = nil
 		v.Findings = nil
 		v.More = true
 		v.Truncated = true

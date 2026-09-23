@@ -27,12 +27,13 @@ type ExploreRequest struct {
 	MaxOutputTokens int     `json:"max_output_tokens,omitempty" jsonschema:"Default 800, range 512 to 8192. Conservative UTF-8 JSON byte budget, at most one byte per token allowance."`
 }
 type Evidence struct {
-	File    string `json:"file"`
-	Line    int    `json:"line"`
-	EndLine int    `json:"end_line"`
-	Symbol  string `json:"symbol,omitempty"`
-	Quote   string `json:"quote,omitempty"`
-	SHA     string `json:"sha256,omitempty"`
+	Artifact string `json:"artifact,omitempty"`
+	File     string `json:"file,omitempty"`
+	Line     int    `json:"line"`
+	EndLine  int    `json:"end_line"`
+	Symbol   string `json:"symbol,omitempty"`
+	Quote    string `json:"quote,omitempty"`
+	SHA      string `json:"sha256,omitempty"`
 }
 type Finding struct {
 	Kind     string     `json:"kind"`
@@ -40,23 +41,28 @@ type Finding struct {
 	Evidence []Evidence `json:"evidence"`
 }
 type Exploration struct {
-	Answer   string    `json:"answer"`
-	Findings []Finding `json:"findings"`
+	Diagnosis *Diagnosis `json:"diagnosis,omitempty"`
+	Answer    string     `json:"answer"`
+	Findings  []Finding  `json:"findings"`
 }
 type ExploreResult struct {
-	RunID       string    `json:"run_id"`
-	State       string    `json:"state"`
-	Fingerprint string    `json:"repository_state"`
-	Freshness   string    `json:"freshness"`
-	Iteration   int       `json:"iteration"`
-	Answer      string    `json:"answer,omitempty"`
-	Findings    []Finding `json:"findings,omitempty"`
-	Truncated   bool      `json:"truncated"`
-	More        bool      `json:"more"`
-	NextOffset  int       `json:"next_offset"`
-	Error       string    `json:"error,omitempty"`
+	Diagnosis    *Diagnosis           `json:"diagnosis,omitempty"`
+	Reproduction *ReproductionSummary `json:"reproduction,omitempty"`
+	RunID        string               `json:"run_id"`
+	State        string               `json:"state"`
+	Fingerprint  string               `json:"repository_state"`
+	Freshness    string               `json:"freshness"`
+	Iteration    int                  `json:"iteration"`
+	Answer       string               `json:"answer,omitempty"`
+	Findings     []Finding            `json:"findings,omitempty"`
+	Truncated    bool                 `json:"truncated"`
+	More         bool                 `json:"more"`
+	NextOffset   int                  `json:"next_offset"`
+	Error        string               `json:"error,omitempty"`
 }
 type ResultRequest struct {
+	Log             bool   `json:"log,omitempty" jsonschema:"Retrieve a bounded reproduction.log byte range for a diagnosis run."`
+	LogOffset       int    `json:"log_offset,omitempty" jsonschema:"One-based log byte offset; default 1. Continue with returned next_offset."`
 	RunID           string `json:"run_id"`
 	MaxOutputTokens int    `json:"max_output_tokens,omitempty"`
 	FindingOffset   int    `json:"finding_offset,omitempty" jsonschema:"Exploration finding index for paginated retrieval."`
@@ -73,6 +79,9 @@ func outputBudget(n int) (int, error) {
 	return n, nil
 }
 func (a *App) Explore(ctx context.Context, in ExploreRequest) (ExploreResult, error) {
+	return a.investigate(ctx, in, "explore", nil)
+}
+func (a *App) investigate(ctx context.Context, in ExploreRequest, operation string, repro *runner.ReproduceRequest) (ExploreResult, error) {
 	if strings.TrimSpace(in.Question) == "" || len(in.Question) > 32768 {
 		return ExploreResult{}, fmt.Errorf("question must contain 1 to 32768 bytes")
 	}
@@ -90,8 +99,8 @@ func (a *App) Explore(ctx context.Context, in ExploreRequest) (ExploreResult, er
 		if e != nil {
 			return ExploreResult{}, e
 		}
-		if r.Operation != "explore" {
-			return ExploreResult{}, fmt.Errorf("run is not an exploration")
+		if r.Operation != operation {
+			return ExploreResult{}, fmt.Errorf("run operation is %s; use the matching investigation tool", r.Operation)
 		}
 	} else {
 		w, e := workspace.Resolve(ctx, in.CWD)
@@ -110,7 +119,7 @@ func (a *App) Explore(ctx context.Context, in ExploreRequest) (ExploreResult, er
 		if e != nil {
 			return ExploreResult{}, e
 		}
-		r = store.Run{ID: store.ID(), Operation: "explore", Origin: "mcp", Workspace: w, Config: p, Started: time.Now().UTC(), State: "running"}
+		r = store.Run{ID: store.ID(), Operation: operation, Origin: "mcp", Workspace: w, Config: p, Started: time.Now().UTC(), State: "running"}
 	}
 	w, e := workspace.Resolve(ctx, r.Workspace.Root)
 	if e != nil {
@@ -151,8 +160,12 @@ func (a *App) Explore(ctx context.Context, in ExploreRequest) (ExploreResult, er
 			return ExploreResult{}, e
 		}
 	} // Explorations are not implementation experiment assignments.
-	prompt := runner.ExplorePrompt + "\nQuestion (task data):\n" + in.Question
-	_, runErr := a.execute(ctx, &r, before, prompt, lock, resume)
+	prompt := runner.ExplorePrompt
+	if operation == "diagnose" {
+		prompt += "\n" + runner.DiagnosePrompt
+	}
+	prompt += "\nQuestion (task data):\n" + in.Question
+	_, runErr := a.execute(ctx, &r, before, prompt, lock, resume, repro)
 	// Avoid reacquiring the lock through Result while it is still held here.
 	v, e := exploreView(ctx, r, ResultRequest{RunID: r.ID, MaxOutputTokens: in.MaxOutputTokens})
 	return v, errors.Join(runErr, e)
@@ -178,7 +191,7 @@ func source(root, path string) ([]byte, error) {
 	}
 	return os.ReadFile(real)
 }
-func parseExploration(raw, root string) (Exploration, error) {
+func parseExploration(raw, root string, logs ...string) (Exploration, error) {
 	var v Exploration
 	if e := json.Unmarshal([]byte(raw), &v); e != nil {
 		return v, fmt.Errorf("exploration did not return a valid JSON report")
@@ -202,7 +215,16 @@ func parseExploration(raw, root string) (Exploration, error) {
 		}
 		for j := range f.Evidence {
 			ev := &f.Evidence[j]
-			b, e := source(root, ev.File)
+			var b []byte
+			var e error
+			if ev.Artifact != "" {
+				if ev.Artifact != "reproduction.log" || ev.File != "" || len(logs) == 0 || logs[0] == "" {
+					return v, fmt.Errorf("unknown evidence artifact")
+				}
+				b, e = os.ReadFile(logs[0])
+			} else {
+				b, e = source(root, ev.File)
+			}
 			if e != nil {
 				return v, fmt.Errorf("invalid evidence file: %w", e)
 			}
@@ -244,7 +266,16 @@ func exploreFreshness(ctx context.Context, r store.Run) string {
 	}
 	for _, f := range report.Findings {
 		for _, ev := range f.Evidence {
-			b, e := source(r.Workspace.Root, ev.File)
+			var b []byte
+			var e error
+			if ev.Artifact != "" {
+				if ev.Artifact != "reproduction.log" || it.Reproduction == nil || it.Reproduction.Log == "" {
+					return "unknown"
+				}
+				b, e = os.ReadFile(it.Reproduction.Log)
+			} else {
+				b, e = source(r.Workspace.Root, ev.File)
+			}
 			if e != nil {
 				return "stale"
 			}
@@ -279,6 +310,9 @@ func exploreView(ctx context.Context, r store.Run, in ResultRequest) (ExploreRes
 	}
 	it := r.Iterations[len(r.Iterations)-1]
 	v.Fingerprint = it.Before.Fingerprint
+	if it.Reproduction != nil {
+		v.Reproduction = &ReproductionSummary{it.Reproduction.Status, it.Reproduction.Exit, it.Reproduction.LogTruncated}
+	}
 	if r.State != "completed" {
 		v.Error = clip(it.Error, 120)
 		return v, nil
@@ -290,12 +324,26 @@ func exploreView(ctx context.Context, r store.Run, in ResultRequest) (ExploreRes
 	if in.FindingOffset > len(report.Findings) {
 		return v, fmt.Errorf("finding_offset exceeds report")
 	}
+	if report.Diagnosis != nil {
+		d := *report.Diagnosis
+		limit := 80
+		if in.Detail {
+			limit = min(2000, budget/4)
+		}
+		d.Cause = clip(d.Cause, limit)
+		d.MinimalFix = clip(d.MinimalFix, limit)
+		d.ReproductionAssessment = clip(d.ReproductionAssessment, limit)
+		v.Truncated = d.Cause != report.Diagnosis.Cause || d.MinimalFix != report.Diagnosis.MinimalFix || d.ReproductionAssessment != report.Diagnosis.ReproductionAssessment
+		v.Diagnosis = &d
+	}
 	answerLimit := 160
 	if in.Detail {
 		answerLimit = budget / 2
 	}
-	v.Answer = clip(report.Answer, answerLimit)
-	v.Truncated = v.Answer != report.Answer
+	if v.Diagnosis == nil {
+		v.Answer = clip(report.Answer, answerLimit)
+		v.Truncated = v.Truncated || v.Answer != report.Answer
+	}
 	v.More = in.FindingOffset < len(report.Findings)
 	for i := in.FindingOffset; i < len(report.Findings); i++ {
 		f := report.Findings[i]
@@ -322,11 +370,14 @@ func exploreView(ctx context.Context, r store.Run, in ResultRequest) (ExploreRes
 	return v, nil
 }
 func (a *App) QueryResult(ctx context.Context, in ResultRequest) (any, error) {
+	if in.Log {
+		return a.reproductionLog(ctx, in)
+	}
 	r, e := a.Store.Get(in.RunID)
 	if e != nil {
 		return nil, e
 	}
-	if r.Operation != "explore" {
+	if !investigation(r.Operation) {
 		return a.Result(in.RunID)
 	}
 	if _, e = a.Result(in.RunID); e != nil {
@@ -344,7 +395,7 @@ func (a *App) Status(ctx context.Context, id string) (any, error) {
 		return nil, e
 	}
 	fresh := ""
-	if v.Operation == "explore" {
+	if investigation(v.Operation) {
 		r, e := a.Store.Get(id)
 		if e != nil {
 			return nil, e

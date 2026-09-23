@@ -19,7 +19,7 @@ Return exactly one JSON object, without Markdown fences:
 Every fact and hypothesis needs source evidence. A hypothesis must explain the missing confirmation.
 For unverified parts explain what was not inspected and why; use an empty evidence array if no source supports it.
 Use real line numbers and exact quotes. Prefer narrow excerpts and concise findings. Do not dump source files.
-A source interval is not proof of measured runtime latency. Do not claim tests or measurements were performed.
+A source interval is not proof of measured runtime latency. Only describe executions explicitly supplied by the harness; you cannot perform tests or measurements yourself.
 `
 
 // The entire host filesystem is read-only. Only private OpenCode state is writable.
@@ -64,7 +64,7 @@ func exploreCommand(binary string, args []string, req Request, env []string) (st
 	}
 	// Copy provider authentication once; resumed sessions keep their private state.
 	auth := filepath.Join(private, "data/opencode/auth.json")
-	if _, e = os.Stat(auth); os.IsNotExist(e) {
+	if _, e = os.Stat(auth); os.IsNotExist(e) && !req.CommandSandbox {
 		home, _ := os.UserHomeDir()
 		data := os.Getenv("XDG_DATA_HOME")
 		if data == "" {
@@ -117,7 +117,11 @@ func exploreEnv(env []string, req Request) ([]string, error) {
 		if agents == nil {
 			agents = map[string]any{}
 		}
-		agents[req.Profile.Agent] = map[string]any{"description": "Read-only coding-worker investigation", "mode": "primary", "model": req.Profile.Model, "steps": req.Profile.MaxSteps, "prompt": ExplorePrompt, "permission": map[string]string{"*": "deny", "read": "allow", "glob": "allow", "grep": "allow", "external_directory": "deny"}}
+		prompt := ExplorePrompt
+		if req.Reproduction != nil {
+			prompt += "\n" + DiagnosePrompt
+		}
+		agents[req.Profile.Agent] = map[string]any{"description": "Read-only coding-worker investigation", "mode": "primary", "model": req.Profile.Model, "steps": req.Profile.MaxSteps, "prompt": prompt, "permission": map[string]string{"*": "deny", "read": "allow", "glob": "allow", "grep": "allow", "external_directory": "deny"}}
 		m["agent"] = agents
 		m["lsp"] = false
 		m["formatter"] = false

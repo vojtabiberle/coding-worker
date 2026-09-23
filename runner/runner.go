@@ -17,12 +17,15 @@ import (
 )
 
 type Request struct {
-	CWD, Prompt string
-	ReadOnly    bool
-	RuntimeDir  string
-	Profile     config.Profile
-	Lock        *os.File
-	Event       func(json.RawMessage) error
+	CWD, Prompt     string
+	ReadOnly        bool
+	RuntimeDir      string
+	Reproduction    *ReproduceRequest
+	ReproductionDir string
+	CommandSandbox  bool
+	Profile         config.Profile
+	Lock            *os.File
+	Event           func(json.RawMessage) error
 }
 type Metrics struct {
 	Input  *int64   `json:"input_tokens"`

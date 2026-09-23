@@ -33,7 +33,7 @@ func TestProtocol(t *testing.T) {
 	}
 	defer cs.Close()
 	list, e := cs.ListTools(ctx, nil)
-	if e != nil || len(list.Tools) != 6 {
+	if e != nil || len(list.Tools) != 7 {
 		t.Fatal(list, e)
 	}
 	v, e := cs.CallTool(ctx, &sdk.CallToolParams{Name: "worker_implement", Arguments: map[string]any{"cwd": "relative", "objective": "test"}})
@@ -60,5 +60,19 @@ func TestExploreTransportBudget(t *testing.T) {
 		if len(body) > budget || !json.Valid([]byte(body)) {
 			t.Fatalf("budget exceeded: %d > %d", len(body), budget)
 		}
+	}
+}
+
+func TestDiagnosisSummaryBudget(t *testing.T) {
+	v := worker.ExploreResult{RunID: strings.Repeat("a", 32), State: "completed", Fingerprint: strings.Repeat("b", 64), Freshness: "current", Iteration: 1, Diagnosis: &worker.Diagnosis{CauseStatus: "hypothesis", Cause: "A polling delay could explain the symptom; measurement is still missing.", MinimalFix: "Proposed: replace polling with event delivery.", ReproductionAssessment: "No command supplied; hypothesis only."}, Reproduction: &worker.ReproductionSummary{Status: "not_run"}}
+	r, _, e := exploreResponse(v, nil, 800)
+	if e != nil {
+		t.Fatal(e)
+	}
+	b := r.Content[0].(*sdk.TextContent).Text
+	var got worker.ExploreResult
+	json.Unmarshal([]byte(b), &got)
+	if len(b) > 800 || got.Diagnosis == nil {
+		t.Fatalf("diagnosis lost from default summary: %s", b)
 	}
 }

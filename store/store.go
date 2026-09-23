@@ -33,13 +33,14 @@ type Run struct {
 	Iterations []Iteration         `json:"iterations"`
 }
 type Iteration struct {
-	Number   int                `json:"number"`
-	Started  time.Time          `json:"started_at"`
-	Finished *time.Time         `json:"finished_at"`
-	Before   workspace.Snapshot `json:"before"`
-	After    workspace.Snapshot `json:"after"`
-	Result   runner.Result      `json:"result"`
-	Error    string             `json:"error,omitempty"`
+	Reproduction *runner.Reproduction `json:"reproduction,omitempty"`
+	Number       int                  `json:"number"`
+	Started      time.Time            `json:"started_at"`
+	Finished     *time.Time           `json:"finished_at"`
+	Before       workspace.Snapshot   `json:"before"`
+	After        workspace.Snapshot   `json:"after"`
+	Result       runner.Result        `json:"result"`
+	Error        string               `json:"error,omitempty"`
 }
 type Review struct {
 	RunID             string `json:"run_id"`
