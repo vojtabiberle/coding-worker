@@ -17,6 +17,7 @@ import (
 )
 
 type Request struct {
+	Review          bool
 	CWD, Prompt     string
 	ReadOnly        bool
 	RuntimeDir      string

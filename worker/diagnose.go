@@ -28,7 +28,9 @@ type ReproductionSummary struct {
 	LogTruncated bool   `json:"log_truncated"`
 }
 
-func investigation(operation string) bool { return operation == "explore" || operation == "diagnose" }
+func investigation(operation string) bool {
+	return operation == "explore" || operation == "diagnose" || operation == "review"
+}
 func (a *App) Diagnose(ctx context.Context, in DiagnoseRequest) (ExploreResult, error) {
 	spec := runner.ReproduceRequest{Command: in.ReproductionCommand, TimeoutSeconds: in.TimeoutSeconds}
 	if e := spec.Validate(); e != nil {

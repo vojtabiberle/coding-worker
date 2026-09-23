@@ -33,7 +33,7 @@ func TestProtocol(t *testing.T) {
 	}
 	defer cs.Close()
 	list, e := cs.ListTools(ctx, nil)
-	if e != nil || len(list.Tools) != 8 {
+	if e != nil || len(list.Tools) != 9 {
 		t.Fatal(list, e)
 	}
 	v, e := cs.CallTool(ctx, &sdk.CallToolParams{Name: "worker_implement", Arguments: map[string]any{"cwd": "relative", "objective": "test"}})

@@ -118,6 +118,9 @@ func exploreEnv(env []string, req Request) ([]string, error) {
 			agents = map[string]any{}
 		}
 		prompt := ExplorePrompt
+		if req.Review {
+			prompt += "\n" + ReviewPrompt
+		}
 		if req.Reproduction != nil {
 			prompt += "\n" + DiagnosePrompt
 		}

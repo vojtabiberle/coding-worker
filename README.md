@@ -1,10 +1,10 @@
 # coding-worker
 
-Shared local implementation worker for Codex, Claude Code, and other MCP clients. OpenCode implements code; the calling orchestrator owns architecture, review, and acceptance. Switching worker models requires no MCP client changes.
+Shared local coding worker for Codex, Claude Code, and other MCP clients. OpenCode implements, explores, diagnoses, and reviews code; deterministic verification runs explicit checks without a model. The calling orchestrator owns architecture, review, and acceptance. Switching worker models requires no MCP client changes.
 
-See [future version ideas](ROADMAP.md) for task-aware routing, remote execution, basic reviews, and repository check setup.
+See [future version ideas](ROADMAP.md) for task-aware routing, remote execution, review integration, asynchronous execution, and repository check discovery.
 
-The optional [coding-worker skill](skills/coding-worker/SKILL.md) guides delegation, independent validation, correction rounds, and external acceptance. Install its folder into `~/.codex/skills/coding-worker/` and invoke it as `$coding-worker`. The MCP server remains usable without the skill.
+The optional [coding-worker skill](skills/coding-worker/SKILL.md) guides tool selection, compact investigation results, implementation delegation, independent validation, correction rounds, and external acceptance. Install its folder into `~/.codex/skills/coding-worker/` and invoke it as `$coding-worker`. The MCP server remains usable without the skill.
 
 ## Install
 
@@ -93,14 +93,25 @@ Set client execution timeouts appropriately; cancellation kills the OpenCode pro
 
 ### Tools
 
-- `worker_implement`: required absolute `cwd` and `objective`; optional `constraints`, `acceptance_criteria`, `relevant_context`, `profile`, `origin`.
-- `worker_continue`: `run_id`, `feedback`, optional additional `acceptance_criteria`.
-- `worker_verify`: execute an explicit check without a model; bounded results and paginated logs. See verification below.
-- `worker_diagnose`: diagnosis with optional caller-specified reproduction, evidence-backed cause/hypothesis, and proposed minimal fix. See diagnosis below.
-- `worker_explore`: focused read-only investigation; new requests take absolute `cwd` and `question`, follow-ups take `run_id` and `question`. See read-only exploration below.
-- `worker_status`: `run_id`; compact execution metadata without a report.
-- `worker_result`: `run_id`; implementation result or bounded exploration findings. Raw diffs and event logs are omitted.
-- `worker_record_review`: `run_id`, `verdict` (`accepted`, `changes_requested`, `rejected`), `reviewer`, `blocker`, `major`, `minor`, `notes`; optional nullable `tests_passed`, `hidden_e2e_success`, `human_intervention`.
+| Tool | Returns | Execution and continuation |
+| --- | --- | --- |
+| `worker_implement` | Run/session IDs, workspace/profile, latest iteration, change summary, reported checks, metrics and reviews | Writes code; new absolute `cwd` and `objective`; no commit/push |
+| `worker_continue` | Updated implementation result | Same implementation session with `run_id` and `feedback`; rejects repository drift |
+| `worker_explore` | Answer, fact/hypothesis/unverified findings, source locations and hashes | Read-only; new `cwd`/`question`, follow-up `run_id`/`question` |
+| `worker_diagnose` | Cause status, reproduction assessment, proposed minimal fix, source/log evidence | Optional explicit reproduction command; same-session follow-up; no fix applied |
+| `worker_verify` | Check outcome, exit status, duration, bounded log excerpt and freshness | One explicit command per new run, no model; no session continuation |
+| `worker_review` | Findings with severity, reason and source/diff evidence | Read-only working-tree review against HEAD; includes untracked files; same-session follow-up |
+| `worker_status` | Run ID, state, operation, iteration count, timestamps and applicable freshness | No report or full logs; does not rerun work |
+| `worker_result` | Stored implementation result, investigation findings, verification summary or log page | Does not rerun work; `detail`/`finding_offset` for findings, `log`/`log_offset` for diagnosis/verification logs |
+| `worker_record_review` | `recorded: true` on success | Records an external verdict: `accepted`, `changes_requested`, or `rejected` |
+
+Investigation and verification responses default to a conservative **800 UTF-8 JSON byte** budget (`max_output_tokens`, range 512–8192), with one text payload and no duplicated structured report. This budget does not apply to implementation results. Finding pagination uses `more`/`next_offset`; log pagination uses one-based byte offsets and `next_offset`. Complete validated reports stay in SQLite; retained command logs stay in private files (8 MiB cap, truncation flagged).
+
+New runs require absolute `cwd`. Explore/diagnose/review follow-ups omit `cwd` and `profile`, retaining the original session and model. They reject stale or unverifiable repository state. Verification always starts a new run. All calls currently execute synchronously; timeout does not establish cancellation or failure. Recover status/results before resubmitting.
+
+Explore/diagnose/review/verify require Linux and Bubblewrap. Investigations use read/glob/grep; reproduction and verification commands run with read-only host files, private writable runtime storage, and networking disabled. The inference provider retains network access. All operations share the per-worktree lock; different worktrees are independent. Explicit investigation profiles bypass implementation experiments.
+
+`worker_review` provides preliminary findings, while `worker_record_review` records the external acceptance decision. A completed run, matching citation, or zero exit status alone does not establish correctness.
 
 Example implementation request:
 
@@ -311,3 +322,23 @@ Linux and Bubblewrap are required. Commands use the diagnosis sandbox: filesyste
 Responses include elapsed time, repository fingerprint/freshness, and a bounded log excerpt with line number. `worker_status` stays compact; `worker_result` retrieves the summary, or `log:true` with `log_offset` retrieves log pages. Logs retain up to 8 MiB; excess output is drained and `log_truncated` is set. The default budget is 800 conservative UTF-8 bytes (512–8192). `truncated` marks shortened excerpts. Full retained logs and original argv remain in local run artifacts. Freshness covers Git state including dirty/untracked files, not ignored dependencies or environment changes.
 
 Every call starts a new run; reading status/results never reruns checks. Verification does not participate in model experiments and cannot be resumed through `worker_continue`.
+
+### Code review
+
+`worker_review` inspects current worktree changes against `HEAD`, including untracked files:
+
+```json
+{"cwd":"/absolute/repo","question":"Find correctness regressions and explain concrete failure scenarios."}
+```
+
+It uses the read-only investigation sandbox and configured model. Findings include `severity` (`high`, `medium`, `low`), `kind` (`fact`, `hypothesis`, `unverified`), a reason, and validated evidence. At least one citation must reference a changed file or `review.diff`. Deleted code can cite exact diff lines using `artifact:"review.diff"`; those line numbers belong to the diff, not the deleted source. No findings is valid and does not prove correctness. Tests are not executed.
+
+Follow up with `run_id` and `question`. Git state drift rejects continuation. `worker_result` supports `detail:true`, `finding_offset`, and the shared 800-byte default budget; `worker_status` stays compact. Full reports and the captured diff remain in local run records. This tool does not record an external acceptance verdict; use `worker_record_review` for that.
+
+The initial scope is the final working tree versus `HEAD`, not a branch/base-ref review or separate index review. Review context (diff plus changed paths) above 128 KiB is rejected rather than silently truncated. Binary changes and missing runtime evidence should be described as limitations in the answer. Source citations are mechanically validated; the reviewer must still assess the model's reasoning.
+
+## Experience informing the workflow
+
+User-reported implementation feedback described two repaired output-reading bugs with regression tests, but also premature completion, missed daemon/concurrency concerns, and an unchecked TypeScript build after corrections. Three implementation/review rounds were needed; final tests and build were checked independently. This is qualitative feedback, not a model-ranking experiment.
+
+Keep tasks bounded with precise acceptance criteria. Check process ownership, cancellation, lock lifetime and cleanup when relevant; report tests, build and type checks separately. One reported MCP timeout occurred after 300 seconds while a result remained retrievable; that does not establish cancellation behavior. Retrieve known runs before retrying. The previously unclear review verdict is now documented and validated as `accepted`, not `approved`.

@@ -1,11 +1,11 @@
 ---
 name: coding-worker
-description: Delegate bounded implementation tasks through the coding-worker MCP server, review resulting changes independently, and manage correction rounds and external acceptance. Use when the user requests coding-worker or OpenCode-backed implementation delegation; not for configuring OpenCode or for unrelated coding tasks.
+description: Use coding-worker MCP for bounded implementation, repository exploration, diagnosis, verification, and code review, with independent validation and external acceptance. Use when the user requests coding-worker or OpenCode-backed delegation; not for developing or configuring the worker itself.
 ---
 
 # Coding worker orchestration
 
-Use coding-worker for implementation. Keep architecture, scope decisions, review, and acceptance with the calling orchestrator. A completed worker run is not an accepted solution.
+Select the coding-worker operation matching the task. Keep architecture, scope decisions, independent review, and acceptance with the calling orchestrator. A completed worker run is not an accepted solution.
 
 ## Prepare the task
 
@@ -16,13 +16,38 @@ Use coding-worker for implementation. Keep architecture, scope decisions, review
 - Bound the objective and acceptance criteria. Include relevant files, interface constraints, known failures, and review concerns without copying the entire repository into the request.
 - Omit `profile` unless the user selected one or the task explicitly requires an override. Let repository/global configuration or an active experiment choose the model.
 
+## Choose the operation
+
+| Need | Tool | Returned evidence |
+| --- | --- | --- |
+| Implement a bounded change | `worker_implement` | Change summary, session, reported checks and metrics |
+| Answer a repository question without edits | `worker_explore` | Answer and source-backed facts, hypotheses, unverified parts |
+| Explain a bug and propose a minimal fix | `worker_diagnose` | Cause status, reproduction assessment, source/log evidence; no fix applied |
+| Run a known check | `worker_verify` | Observed outcome, exit status, duration and log excerpt; no model |
+| Inspect current changes | `worker_review` | Severity, reason and validated source/diff citations; no edits or tests |
+
+Explore/diagnose/review start with absolute `cwd` and `question`, plus optional `profile`. Follow up through the same tool with `run_id` and `question`, omitting `cwd` and `profile`. `worker_continue` is implementation-only. Investigations use the configured profile outside implementation experiments. Review scope is working tree against HEAD including untracked files; no arbitrary base-ref support. Pre-existing dirty changes are included. `review.diff` citations use diff line numbers, especially for deleted code.
+
+Diagnosis can take `reproduction_command` as explicit argv. Omit it for static diagnosis or to reuse prior observations on follow-up; supplying it runs a new attempt. Verification requires `command` argv and always starts a new run. These commands have a default 30-second timeout, maximum 120; no shell interpolation unless explicitly invoking a shell. A failed command or environment error does not prove the reported bug was reproduced.
+
+These four tools require Linux/Bubblewrap. Model investigations have read/glob/grep access only. Reproduction/verification commands run with read-only host files, private temporary storage, minimal environment and no network. Checks writing repository build output may fail; use supported temporary output paths or report the limitation. Do not silently bypass the sandbox or install dependencies. Inference provider networking remains enabled.
+
+## Retrieve evidence economically
+
+- Default `max_output_tokens` is a conservative 800 UTF-8 JSON **byte** budget, allowed 512–8192. Implementation results do not use this budget.
+- `worker_status` returns state, operation, iteration count, timestamps and applicable freshness, without a report. It never reruns work.
+- `worker_result` returns stored findings/summary. Use `detail:true` for quotes/hashes and `finding_offset` from `next_offset` while `more` is true. If an item cannot fit and the offset does not advance, increase the budget or request summary form.
+- For diagnosis/verification logs, use `log:true` and one-based `log_offset`; continue with returned `next_offset`. Full retained logs stay in private files, capped at 8 MiB; `log_truncated` means output was lost. A shortened summary is separately marked `truncated`.
+- `current` freshness covers recorded Git state and cited source hashes, not all ignored dependencies or runtime inputs. `stale`/`unknown` conclusions cannot support current acceptance; inspect drift and start a new run when appropriate. Do not relabel old evidence as current.
+- Facts/hypotheses require checked citations, but quote validation does not validate reasoning. Review severity is high/medium/low. No findings is not proof of correctness. Verification `state` describes execution; `outcome` distinguishes passed/failed/timed_out/cancelled/start_failed, and passed only means exit 0.
+
 ## Delegate and track
 
 Call `worker_implement` with `cwd`, `objective`, and applicable `constraints`, `acceptance_criteria`, and `relevant_context`. Include the selected validation commands in the criteria and request their actual results, including skipped checks.
 
 Retain the returned `run_id` for status, correction, and review. Use `worker_status` or `worker_result` to inspect progress/results without fetching raw logs by default.
 
-- A physical worktree allows one writer. On `busy`, inspect known active work and retry only after it finishes. Do not delete locks or start a competing local implementation.
+- All operations hold the same worktree lock, including investigations. On `busy`, inspect known active work and retry only after it finishes. Do not delete locks or start a competing local implementation.
 - Different existing worktrees can execute independently when parallel delegation is in scope. Do not create extra branches/worktrees merely because the tools permit it.
 - While a worker writes, avoid your own edits and validation commands that mutate that same worktree.
 - Timeout is not proof of failure, cancellation, or success. If a run ID is known, retrieve status/result before resubmitting. If no ID was returned, use `workerctl sessions` when available and correlate workspace, time, and state; do not guess among ambiguous runs. Do not blindly repeat a potentially active implementation.
@@ -30,7 +55,7 @@ Retain the returned `run_id` for status, correction, and review. Use `worker_sta
 
 ## Independently review and validate
 
-After execution finishes, inspect the actual diff and relevant surrounding code against the objective and acceptance criteria. Snapshots include the entire dirty worktree against HEAD, so not every changed line belongs to this worker.
+Use `worker_review` for an optional preliminary pass; it does not replace external acceptance or automatically record a verdict. After execution finishes, inspect the actual diff and relevant surrounding code against the objective and acceptance criteria. Snapshots include the entire dirty worktree against HEAD, so not every changed line belongs to this worker.
 
 Run the relevant validation independently using the final code. Report exact commands and outcomes; keep test, build, and type-check results distinct. Explain unavailable or skipped checks rather than treating them as passed. Revalidate affected checks after corrections; old passing results do not validate newer edits.
 

@@ -170,6 +170,7 @@ func (a *App) execute(ctx context.Context, r *store.Run, before workspace.Snapsh
 		req.RuntimeDir = filepath.Join(a.Store.Dir, "explore", r.ID)
 		req.Profile.Agent = runner.ExploreAgent + "-" + r.ID
 	}
+	req.Review = r.Operation == "review"
 	req.Reproduction = repro
 	req.ReproductionDir = filepath.Join(a.Store.Dir, "reproductions", r.ID, fmt.Sprint(len(r.Iterations)))
 	return a.invoke(ctx, r, req, resume)
@@ -230,7 +231,14 @@ func (a *App) invoke(ctx context.Context, r *store.Run, req runner.Request, resu
 		if i.Reproduction != nil {
 			logPath = i.Reproduction.Log
 		}
-		report, err := parseExploration(result.Report, r.Workspace.Root, logPath)
+		diff := ""
+		if r.Operation == "review" {
+			diff = i.Before.Diff
+		}
+		report, err := parseExploration(result.Report, r.Workspace.Root, logPath, diff)
+		if err == nil && r.Operation == "review" {
+			err = validateCodeReview(report, i.Before)
+		}
 		if err == nil && r.Operation == "diagnose" {
 			err = validateDiagnosis(report, i.Reproduction)
 		}

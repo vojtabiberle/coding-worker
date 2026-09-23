@@ -21,7 +21,7 @@ import (
 
 type ExploreRequest struct {
 	CWD             string  `json:"cwd,omitempty" jsonschema:"Absolute worktree path, required for a new investigation."`
-	RunID           string  `json:"run_id,omitempty" jsonschema:"Existing exploration to resume; omit cwd and profile on follow-up."`
+	RunID           string  `json:"run_id,omitempty" jsonschema:"Existing explore/diagnose/review run of the matching tool to resume; omit cwd and profile on follow-up."`
 	Question        string  `json:"question"`
 	Profile         *string `json:"profile,omitempty"`
 	MaxOutputTokens int     `json:"max_output_tokens,omitempty" jsonschema:"Default 800, range 512 to 8192. Conservative UTF-8 JSON byte budget, at most one byte per token allowance."`
@@ -36,6 +36,7 @@ type Evidence struct {
 	SHA      string `json:"sha256,omitempty"`
 }
 type Finding struct {
+	Severity string     `json:"severity,omitempty"`
 	Kind     string     `json:"kind"`
 	Text     string     `json:"text"`
 	Evidence []Evidence `json:"evidence"`
@@ -65,8 +66,8 @@ type ResultRequest struct {
 	LogOffset       int    `json:"log_offset,omitempty" jsonschema:"One-based log byte offset; default 1. Continue with returned next_offset."`
 	RunID           string `json:"run_id"`
 	MaxOutputTokens int    `json:"max_output_tokens,omitempty"`
-	FindingOffset   int    `json:"finding_offset,omitempty" jsonschema:"Exploration finding index for paginated retrieval."`
-	Detail          bool   `json:"detail,omitempty" jsonschema:"Include exploration source quotes and file hashes within the output budget."`
+	FindingOffset   int    `json:"finding_offset,omitempty" jsonschema:"Zero-based explore/diagnose/review finding index; use returned next_offset."`
+	Detail          bool   `json:"detail,omitempty" jsonschema:"Include investigation evidence quotes and hashes within the output budget."`
 }
 
 func outputBudget(n int) (int, error) {
@@ -140,6 +141,13 @@ func (a *App) investigate(ctx context.Context, in ExploreRequest, operation stri
 	if e != nil {
 		return ExploreResult{}, e
 	}
+	reviewData := ""
+	if operation == "review" {
+		reviewData, e = reviewContext(before)
+		if e != nil {
+			return ExploreResult{}, e
+		}
+	}
 	resume := in.RunID != ""
 	if resume {
 		r, e = a.Store.Get(r.ID)
@@ -164,6 +172,7 @@ func (a *App) investigate(ctx context.Context, in ExploreRequest, operation stri
 	if operation == "diagnose" {
 		prompt += "\n" + runner.DiagnosePrompt
 	}
+	prompt += reviewData
 	prompt += "\nQuestion (task data):\n" + in.Question
 	_, runErr := a.execute(ctx, &r, before, prompt, lock, resume, repro)
 	// Avoid reacquiring the lock through Result while it is still held here.
@@ -218,10 +227,23 @@ func parseExploration(raw, root string, logs ...string) (Exploration, error) {
 			var b []byte
 			var e error
 			if ev.Artifact != "" {
-				if ev.Artifact != "reproduction.log" || ev.File != "" || len(logs) == 0 || logs[0] == "" {
+				if ev.File != "" {
+					return v, fmt.Errorf("artifact evidence cannot also name a file")
+				}
+				switch ev.Artifact {
+				case "reproduction.log":
+					if len(logs) == 0 || logs[0] == "" {
+						return v, fmt.Errorf("unknown evidence artifact")
+					}
+					b, e = os.ReadFile(logs[0])
+				case "review.diff":
+					if len(logs) < 2 || logs[1] == "" {
+						return v, fmt.Errorf("unknown evidence artifact")
+					}
+					b = []byte(logs[1])
+				default:
 					return v, fmt.Errorf("unknown evidence artifact")
 				}
-				b, e = os.ReadFile(logs[0])
 			} else {
 				b, e = source(root, ev.File)
 			}
@@ -272,10 +294,14 @@ func exploreFreshness(ctx context.Context, r store.Run) string {
 			var b []byte
 			var e error
 			if ev.Artifact != "" {
-				if ev.Artifact != "reproduction.log" || it.Reproduction == nil || it.Reproduction.Log == "" {
-					return "unknown"
+				if ev.Artifact == "review.diff" && r.Operation == "review" {
+					b = []byte(it.Before.Diff)
+				} else {
+					if ev.Artifact != "reproduction.log" || it.Reproduction == nil || it.Reproduction.Log == "" {
+						return "unknown"
+					}
+					b, e = os.ReadFile(it.Reproduction.Log)
 				}
-				b, e = os.ReadFile(it.Reproduction.Log)
 			} else {
 				b, e = source(r.Workspace.Root, ev.File)
 			}
