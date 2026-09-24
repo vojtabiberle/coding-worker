@@ -158,7 +158,7 @@ func (a *App) Continue(ctx context.Context, in ContinueRequest) (Result, error) 
 	return a.execute(ctx, &r, before, runner.Prompt(in.Feedback, nil, in.Acceptance, "Continue the existing implementation session."), lock, true, nil)
 }
 func (a *App) execute(ctx context.Context, r *store.Run, before workspace.Snapshot, prompt string, lock *os.File, resume bool, repro *runner.ReproduceRequest) (Result, error) {
-	i := store.Iteration{Number: len(r.Iterations) + 1, Started: time.Now().UTC(), Before: before}
+	i := store.Iteration{State: "running", Number: len(r.Iterations) + 1, Started: time.Now().UTC(), Before: before}
 	r.Iterations = append(r.Iterations, i)
 	r.State = "running"
 	r.Phase = "queued"
@@ -189,6 +189,7 @@ func (a *App) execute(ctx context.Context, r *store.Run, before workspace.Snapsh
 		if e != nil {
 			r.State = "failed"
 			r.Iterations[len(r.Iterations)-1].Error = e.Error()
+			r.Iterations[len(r.Iterations)-1].State = "failed"
 			return Result{RunID: r.ID, State: r.State}, errors.Join(e, a.Store.Save(r))
 		}
 		return Result{RunID: r.ID, Operation: r.Operation, State: "running"}, nil
@@ -293,6 +294,7 @@ func (a *App) invoke(ctx context.Context, r *store.Run, req runner.Request, resu
 		}
 		i.Error = runErr.Error()
 	}
+	i.State = r.State
 	if e = a.Store.Save(r); e != nil {
 		return Result{RunID: r.ID, Operation: r.Operation, State: r.State}, fmt.Errorf("persist final run: %w", e)
 	}

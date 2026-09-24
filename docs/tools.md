@@ -14,13 +14,14 @@ Execution tools first return a `run_id` acknowledgement. The table describes the
 | `worker_diagnose` | Cause status, reproduction assessment, proposed minimal fix, source/log evidence | Optional explicit reproduction command; same-session follow-up; no fix applied |
 | `worker_verify` | Check outcome, exit status, duration, bounded log excerpt and freshness | One explicit command per new run, no model; no session continuation |
 | `worker_review` | Findings with severity, reason and source/diff evidence | Read-only working-tree review against HEAD; includes untracked files; same-session follow-up |
+| `worker_wait` | Run ID, iteration, latest iteration, state, done/timed_out, phase and available last_progress | Waits up to 60 seconds; no report, logs or freshness check |
 | `worker_status` | Run ID, state, operation, iteration count, timestamps, phase/last_progress and applicable freshness | No report or full logs; does not rerun work |
 | `worker_result` | Stored implementation result, investigation findings, verification summary or log page | Does not rerun work; `detail`/`finding_offset` for findings, `log`/`log_offset` for diagnosis/verification logs |
 | `worker_record_review` | `recorded: true` on success | Records an external verdict: `accepted`, `changes_requested`, or `rejected` |
 
 Investigation and verification responses default to a conservative **800 UTF-8 JSON byte** budget (`max_output_bytes`, range 512–8192), with one text payload and no duplicated structured report. This budget does not apply to implementation results. Finding pagination uses `more`/`next_offset`; log pagination uses one-based byte offsets and `next_offset`. Complete validated reports stay in SQLite; retained command logs stay in private files (8 MiB cap, truncation flagged).
 
-New runs require absolute `cwd`. Explore/diagnose/review follow-ups omit `cwd` and `profile`, retaining the original session and model. They reject stale or unverifiable repository state. Verification always starts a new run. Execution tools return `run_id` and `state: running`; retrieve completion with `worker_status`, then `worker_result`. Preflight (including Git capture) remains synchronous. A request timeout does not establish cancellation or failure; recover status/results before resubmitting.
+New runs require absolute `cwd`. Explore/diagnose/review follow-ups omit `cwd` and `profile`, retaining the original session and model. They reject stale or unverifiable repository state. Verification always starts a new run. Execution tools return `run_id` and `state: running`; wait for completion with `worker_wait`, then retrieve `worker_result`. Preflight (including Git capture) remains synchronous. A request timeout does not establish cancellation or failure; recover status/results before resubmitting.
 
 Explore/diagnose/review/verify require Linux and Bubblewrap. Investigations use read/glob/grep; reproduction and verification commands run with read-only host files, private writable runtime storage, and networking disabled. The inference provider retains network access. All operations share the per-worktree lock; different worktrees are independent. Explicit investigation profiles bypass implementation experiments.
 
@@ -166,3 +167,17 @@ Diagnosis only advertises `reproduction.log` when a log actually exists. Without
 A rejected investigation report can be repaired with the same tool's `run_id` and a corrective `question`; no new run or session is required. The model receives the prior validation error and retained context. Validated citation hashes are saved even when diagnosis semantics are rejected. For historical failed reports lacking validated hashes (or readable JSON), repair eligibility uses the stored before/after and current repository fingerprints; absent hashes are not evidence of drift. Existing stored hashes are still checked. Unhashed ignored inputs cannot be revalidated historically. `freshness:current` on a failed run describes repository state, not valid conclusions. Real repository changes still reject continuation.
 
 For static diagnosis, source facts may be verified, but `cause_status:supported` requires an observed reproduction with source and log facts. A source guard suggesting a bug is fixed or unreachable still requires `hypothesis` or `unverified` and `reproduced:false` until runtime confirmation exists. The harness repeats these constraints alongside observations and on a corrective attempt.
+
+## Waiting for completion
+
+```json
+{"run_id":"RUN_ID","timeout_seconds":45,"iteration":1}
+```
+
+`worker_wait` waits for one iteration, returning immediately if already finished. Omit `iteration` to select the latest at call entry; repeat subsequent waits with the returned number. `timeout_seconds` defaults to 45 (0 also selects the default); allowed nonzero values are 1–60. Choose a duration below the client's tool timeout.
+
+The compact response contains `run_id`, `iteration`, `latest_iteration`, `state`, `done`, `timed_out`, `phase` and available `last_progress`. `done:true` means execution ended, including failed, cancelled or interrupted states; it does not imply success or acceptance. `timed_out:true` means the wait expired while work was still pending. Repeat the wait without resubmitting work. Cancellation of the waiting request also leaves the job running.
+
+A concurrent continuation cannot switch the selected iteration. `worker_result` still returns the **latest** iteration: compare iteration numbers before attributing its report to the waited iteration. Old stored iterations without a reliable terminal state return `done:true,state:"unknown"`; no historical outcome is invented. New runs persist each iteration's terminal state.
+
+The server checks compact SQLite metadata once per second, so other processes sharing the data directory are visible without repeated model tool calls. It holds no database connection or worktree lock between checks. It recovers orphaned runs only after acquiring their writer lock. No model calls, report loading or repository freshness scans occur during ordinary waiting. Use `worker_status` for an immediate snapshot with applicable freshness, and `worker_result` for evidence. Progress timestamps describe phase transitions, not heartbeats. Unknown runs and future iteration numbers are errors. Waiting does not prolong the owning server's lifetime; its shutdown still cancels its jobs.

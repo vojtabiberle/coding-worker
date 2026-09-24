@@ -12,7 +12,7 @@ A shared local MCP worker for coding tasks. Use it from Codex, Claude Code, or a
 | `worker_verify` | Run an explicit check without a model |
 | `worker_review` | Review worktree changes against HEAD |
 
-Runs return an ID promptly. Follow progress with `worker_status`, retrieve evidence with `worker_result`, and record external acceptance with `worker_record_review`. Investigation results are compact, cite sources, and detect repository changes.
+Runs return an ID promptly. Wait for completion with `worker_wait`, retrieve evidence with `worker_result`, and record external acceptance with `worker_record_review`. Investigation results are compact, cite sources, and detect repository changes.
 
 ## Install
 
@@ -68,11 +68,13 @@ Direct MCP calls follow this sequence:
 ```text
 worker_explore {"cwd":"/absolute/repo","question":"Where is input polling scheduled?"}
 → run_id
-worker_status {"run_id":"RUN_ID"}
-→ state and phase
+worker_wait {"run_id":"RUN_ID","timeout_seconds":45}
+→ done, iteration, state and phase
 worker_result {"run_id":"RUN_ID","max_output_bytes":4096}
 → report once the run finishes
 ```
+
+If `timed_out:true`, repeat `worker_wait` with its returned `iteration`; retrieve the report when `done:true`. Use `worker_status` for an immediate progress snapshot.
 
 Explore, diagnose and review accept follow-up questions with the same `run_id`. Results default to 800 UTF-8 JSON bytes; request details or a larger budget when needed. Implementation results are not subject to this limit.
 

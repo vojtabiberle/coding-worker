@@ -80,7 +80,7 @@ command = "/home/YOU/.local/bin/coding-worker"
 tool_timeout_sec = 1800
 ```
 
-Or register with `codex mcp add coding-worker -- /home/YOU/.local/bin/coding-worker`, then set the longer tool timeout in TOML. Execution runs asynchronously; the client timeout covers preflight and acknowledgement, not the full model run.
+Or register with `codex mcp add coding-worker -- /home/YOU/.local/bin/coding-worker`, then set the longer tool timeout in TOML. Execution runs asynchronously; the client timeout covers preflight and acknowledgement, not the full model run. `worker_wait` defaults to 45 seconds (maximum 60); keep its duration below the client tool timeout. Repeated wait timeouts do not stop background work.
 
 Claude Code, globally:
 
