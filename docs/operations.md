@@ -25,7 +25,7 @@ workerctl review RUN_ID changes_requested --major 2 --notes "Handle cancellation
 
 ## MCP execution lifecycle and migration
 
-Reconnect MCP clients after installing the updated binary so `tools/list` and parameter schemas refresh. There are nine tools. Update requests from `max_output_tokens` to `max_output_bytes`; the old name is no longer advertised or supported. Read final reports with `worker_result` after status leaves `running`; the initial response is only an acknowledgement.
+Reconnect MCP clients after installing the updated binary so `tools/list` and parameter schemas refresh. There are ten tools. Update requests from `max_output_tokens` to `max_output_bytes`; the old name is no longer advertised or supported. Read final reports with `worker_result` after `worker_wait` returns `done:true`; the initial response is only an acknowledgement.
 
 Example MCP sequence (tool names identify separate calls):
 
@@ -33,14 +33,17 @@ Example MCP sequence (tool names identify separate calls):
 worker_explore {"cwd":"/absolute/repo","question":"Where is input polling scheduled?"}
 → {"run_id":"RUN_ID","state":"running", ...}
 
-worker_status {"run_id":"RUN_ID"}
-→ {"state":"running","phase":"model","last_progress":"...", ...}
+worker_wait {"run_id":"RUN_ID","timeout_seconds":45}
+→ {"iteration":1,"done":false,"timed_out":true,"state":"running", ...}
+
+worker_wait {"run_id":"RUN_ID","iteration":1,"timeout_seconds":45}
+→ {"iteration":1,"done":true,"timed_out":false,"state":"completed", ...}
 
 # After state becomes completed, failed, cancelled or interrupted:
 worker_result {"run_id":"RUN_ID","max_output_bytes":4096}
 ```
 
-Poll status at reasonable intervals instead of resubmitting the execution request. A failed run can still have useful error details. If the error is marked `truncated:true`, retry **result retrieval**, for example with `max_output_bytes:8192`; this does not rerun the model or command.
+Repeat bounded waits with the returned iteration instead of resubmitting the execution request. Use status for immediate snapshots. Wait timeout/cancellation does not stop the job. A failed run can still have useful error details. If the error is marked `truncated:true`, retry **result retrieval**, for example with `max_output_bytes:8192`; this does not rerun the model or command.
 
 Jobs belong to their stdio server process, not to a persistent daemon. Graceful disconnect/shutdown cancels and joins active jobs before closing SQLite. Abrupt process death leaves runs recoverable as interrupted once their worktree lock is released. Other clients sharing the data directory can inspect stored state. Request cancellation alone does not cancel an accepted job. There is no dedicated cancel tool yet.
 

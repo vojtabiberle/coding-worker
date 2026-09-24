@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/vojtabiberle/coding-worker/config"
 	"github.com/vojtabiberle/coding-worker/store"
 	"github.com/vojtabiberle/coding-worker/worker"
 	"strings"
@@ -33,12 +34,23 @@ func TestProtocol(t *testing.T) {
 	}
 	defer cs.Close()
 	list, e := cs.ListTools(ctx, nil)
-	if e != nil || len(list.Tools) != 9 {
+	if e != nil || len(list.Tools) != 10 {
 		t.Fatal(list, e)
 	}
 	v, e := cs.CallTool(ctx, &sdk.CallToolParams{Name: "worker_implement", Arguments: map[string]any{"cwd": "relative", "objective": "test"}})
 	if e != nil || !v.IsError {
 		t.Fatal(v, e)
+	}
+	if e = db.Create(&store.Run{ID: "finished", State: "completed", Iterations: []store.Iteration{{Number: 1, State: "completed"}}}, config.Config{}, true); e != nil {
+		t.Fatal(e)
+	}
+	w, e := cs.CallTool(ctx, &sdk.CallToolParams{Name: "worker_wait", Arguments: map[string]any{"run_id": "finished"}})
+	if e != nil || w.IsError || w.StructuredContent != nil || len(w.Content) != 1 {
+		t.Fatal(w, e)
+	}
+	var waited worker.WaitResult
+	if e = json.Unmarshal([]byte(w.Content[0].(*sdk.TextContent).Text), &waited); e != nil || !waited.Done || waited.Iteration != 1 || waited.TimedOut {
+		t.Fatal(waited, e)
 	}
 	v, e = cs.CallTool(ctx, &sdk.CallToolParams{Name: "worker_status", Arguments: map[string]any{"run_id": "missing"}})
 	if e != nil || !v.IsError {

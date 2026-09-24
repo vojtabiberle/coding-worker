@@ -38,6 +38,7 @@ These four tools require Linux/Bubblewrap. Model investigations have read/glob/g
 
 - Reconnect after server upgrades to refresh tool schemas. Use `max_output_bytes`, replacing the unsupported old name `max_output_tokens`.
 - Default `max_output_bytes` is a conservative 800 UTF-8 JSON **byte** budget, allowed 512–8192. Implementation results do not use this budget.
+- `worker_wait` blocks until one iteration finishes or its timeout expires (default 45 seconds, maximum 60). Returns `iteration`, `latest_iteration`, `state`, `done`, `timed_out`, phase and available last_progress, without reports/logs/freshness checks. Choose less than the client tool timeout.
 - `worker_status` returns state, operation, iteration count, timestamps, phase/last_progress and applicable freshness, without a report. Progress timestamps indicate phase transitions, not a heartbeat. It never reruns work.
 - `worker_result` returns stored findings/summary. Use `detail:true` for quotes/hashes and `finding_offset` from `next_offset` while `more` is true. If an item cannot fit and the offset does not advance, increase the budget or request summary form.
 - For diagnosis/verification logs, use `log:true` and one-based `log_offset`; continue with returned `next_offset`. Full retained logs stay in private files, capped at 8 MiB; `log_truncated` means output was lost. A shortened summary is separately marked `truncated`.
@@ -50,7 +51,7 @@ These four tools require Linux/Bubblewrap. Model investigations have read/glob/g
 
 Call `worker_implement` with `cwd`, `objective`, and applicable `constraints`, `acceptance_criteria`, and `relevant_context`. Include the selected validation commands in the criteria and request their actual results, including skipped checks.
 
-MCP execution tools acknowledge with a persisted `run_id` and `state: running`, before work completes. Poll `worker_status` at reasonable intervals, then fetch `worker_result`; do not treat the acknowledgement as a completed report. Retain the returned `run_id` for status, correction, and review. Use `worker_status` or `worker_result` to inspect progress/results without fetching raw logs by default.
+MCP execution tools acknowledge with a persisted `run_id` and `state: running`, before work completes. Call `worker_wait`, repeating with its returned `iteration` on `timed_out:true`, then fetch `worker_result` after `done:true`; do not treat the acknowledgement as a completed report. Retain the returned `run_id` for status, correction, and review. Use `worker_status` for an immediate progress snapshot. Wait timeout or cancellation stops waiting only; do not resubmit the job. `done:true` includes failure/cancellation/interruption, not just success. A concurrent continuation cannot change the waited iteration, but `worker_result` returns the latest iteration: compare iteration numbers before attributing its report. Legacy historical iterations can have `done:true,state:"unknown"`; do not invent their outcome.
 
 - All operations hold the same worktree lock, including investigations. On `busy`, inspect known active work and retry only after it finishes. Do not delete locks or start a competing local implementation.
 - Different existing worktrees can execute independently when parallel delegation is in scope. Do not create extra branches/worktrees merely because the tools permit it.

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
@@ -35,6 +36,7 @@ type Run struct {
 	Iterations   []Iteration         `json:"iterations"`
 }
 type Iteration struct {
+	State           string               `json:"state,omitempty"`
 	CitationAttempt *runner.Result       `json:"citation_attempt,omitempty"`
 	Reproduction    *runner.Reproduction `json:"reproduction,omitempty"`
 	Number          int                  `json:"number"`
@@ -156,12 +158,15 @@ func (s *Store) Create(r *Run, c config.Config, explicit bool) error {
 	return tx.Commit()
 }
 func (s *Store) Save(r *Run) error {
-	tx, e := s.DB.Begin()
+	return s.save(context.Background(), r)
+}
+func (s *Store) save(ctx context.Context, r *Run) error {
+	tx, e := s.DB.BeginTx(ctx, nil)
 	if e != nil {
 		return e
 	}
 	defer tx.Rollback()
-	res, e := tx.Exec("UPDATE runs SET state=?,data=? WHERE id=?", r.State, encode(r), r.ID)
+	res, e := tx.ExecContext(ctx, "UPDATE runs SET state=?,data=? WHERE id=?", r.State, encode(r), r.ID)
 	if e != nil {
 		return e
 	}
@@ -170,7 +175,7 @@ func (s *Store) Save(r *Run) error {
 		return fmt.Errorf("run not found")
 	}
 	for _, it := range r.Iterations {
-		if _, e = tx.Exec("INSERT INTO iterations VALUES(?,?,?) ON CONFLICT(run_id,number) DO UPDATE SET data=excluded.data", r.ID, it.Number, encode(it)); e != nil {
+		if _, e = tx.ExecContext(ctx, "INSERT INTO iterations VALUES(?,?,?) ON CONFLICT(run_id,number) DO UPDATE SET data=excluded.data", r.ID, it.Number, encode(it)); e != nil {
 			return e
 		}
 	}
@@ -250,7 +255,12 @@ func (s *Store) Reviews(id string) ([]Review, error) {
 
 // Recover is called only while holding the physical worktree lock.
 func (s *Store) Recover(root string) error {
-	rows, e := s.DB.Query("SELECT data FROM runs WHERE worktree=? AND state='running'", root)
+	return s.RecoverContext(context.Background(), root)
+}
+
+// RecoverContext requires the physical worktree lock, like Recover.
+func (s *Store) RecoverContext(ctx context.Context, root string) error {
+	rows, e := s.DB.QueryContext(ctx, "SELECT data FROM runs WHERE worktree=? AND state='running'", root)
 	if e != nil {
 		return e
 	}
@@ -279,9 +289,10 @@ func (s *Store) Recover(root string) error {
 		if len(r.Iterations) > 0 {
 			i := &r.Iterations[len(r.Iterations)-1]
 			i.Finished = nil
+			i.State = "interrupted"
 			i.Error = "worker process ended without finalization"
 		}
-		if e = s.Save(&r); e != nil {
+		if e = s.save(ctx, &r); e != nil {
 			return e
 		}
 	}

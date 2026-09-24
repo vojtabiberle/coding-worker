@@ -66,7 +66,7 @@ func (a *App) Verify(ctx context.Context, in VerifyRequest) (VerifyResult, error
 		return VerifyResult{}, e
 	}
 	now := time.Now().UTC()
-	r := store.Run{ID: store.ID(), Operation: "verify", Origin: "mcp", Workspace: w, Base: before.SHA, Started: now, State: "running", Iterations: []store.Iteration{{Number: 1, Started: now, Before: before}}}
+	r := store.Run{ID: store.ID(), Operation: "verify", Origin: "mcp", Workspace: w, Base: before.SHA, Started: now, State: "running", Iterations: []store.Iteration{{State: "running", Number: 1, Started: now, Before: before}}}
 	if e = a.Store.Create(&r, config.Config{}, true); e != nil {
 		return VerifyResult{}, e
 	}
@@ -80,6 +80,7 @@ func (a *App) Verify(ctx context.Context, in VerifyRequest) (VerifyResult, error
 		if e != nil {
 			r.State = "failed"
 			r.Iterations[0].Error = e.Error()
+			r.Iterations[0].State = "failed"
 			return VerifyResult{RunID: r.ID, State: r.State}, errors.Join(e, a.Store.Save(&r))
 		}
 		return VerifyResult{RunID: r.ID, State: "running", Outcome: "unknown", Freshness: "unknown"}, nil
@@ -115,6 +116,7 @@ func (a *App) finishVerify(ctx context.Context, r *store.Run, spec runner.Reprod
 	now = time.Now().UTC()
 	r.Finished = &now
 	it.Finished = &now
+	it.State = r.State
 	e = a.Store.Save(r)
 	v, viewErr := verifyView(captureCtx, *r, budget)
 	return v, errors.Join(runErr, e, viewErr)
