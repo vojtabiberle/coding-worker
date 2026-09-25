@@ -25,10 +25,17 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.19.0'
+      - name: Install pinned Pi for local mock-provider tests
+        run: |
+          npm install --ignore-scripts --prefix "$RUNNER_TEMP/pi" @earendil-works/pi-coding-agent@0.78.1
+          echo "$RUNNER_TEMP/pi/node_modules/.bin" >> "$GITHUB_PATH"
       - name: Install sandbox and SQLite build prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y bubblewrap build-essential
+          sudo apt-get install --no-install-recommends -y bubblewrap build-essential ripgrep fd-find
       - name: Check sandbox support
         run: bwrap --ro-bind / / --dev /dev --proc /proc --unshare-net --unshare-pid --die-with-parent /bin/true
       - name: Check formatting
@@ -38,6 +45,8 @@ jobs:
       - name: Vet
         run: go vet ./...
       - name: Test with race detector
+        env:
+          CODING_WORKER_PI_TEST: "1"
         run: go test -race -count=1 ./...
       - name: Build CLI and MCP server
         run: make build

@@ -160,7 +160,7 @@ func (a *App) investigate(ctx context.Context, in ExploreRequest, operation stri
 			return v, fmt.Errorf("exploration is stale or unverifiable; start a new investigation against the current state")
 		}
 		if r.Session == "" {
-			return ExploreResult{}, fmt.Errorf("no resumable OpenCode session")
+			return ExploreResult{}, fmt.Errorf("no resumable backend session")
 		}
 	} else {
 		r.Base = before.SHA

@@ -17,6 +17,7 @@ import (
 )
 
 type Request struct {
+	BackendVersion  string
 	Review          bool
 	CWD, Prompt     string
 	ReadOnly        bool
@@ -40,14 +41,15 @@ type Command struct {
 	Exit    *int   `json:"exit_status"`
 }
 type Result struct {
-	Session    string    `json:"opencode_session_id"`
-	Report     string    `json:"worker_report"`
-	Commands   []Command `json:"commands"`
-	Failures   []string  `json:"failures"`
-	Unresolved []string  `json:"unresolved_issues"`
-	Metrics    Metrics   `json:"metrics"`
-	Exit       int       `json:"exit_status"`
-	Tests      *bool     `json:"tests_passed"`
+	BackendVersion string    `json:"backend_version,omitempty"`
+	Session        string    `json:"session_id"`
+	Report         string    `json:"worker_report"`
+	Commands       []Command `json:"commands"`
+	Failures       []string  `json:"failures"`
+	Unresolved     []string  `json:"unresolved_issues"`
+	Metrics        Metrics   `json:"metrics"`
+	Exit           int       `json:"exit_status"`
+	Tests          *bool     `json:"tests_passed"`
 }
 type Engine interface {
 	Start(context.Context, Request) (Result, error)
@@ -359,6 +361,23 @@ func Parse(reader io.Reader, out *Result, event func(json.RawMessage) error) err
 	}
 	if !sawOutput && len(out.Failures) == 0 {
 		return fmt.Errorf("OpenCode returned no completed output events")
+	}
+	return nil
+}
+
+// UnmarshalJSON keeps runs written before backend-neutral session references readable.
+func (r *Result) UnmarshalJSON(b []byte) error {
+	type plain Result
+	var v struct {
+		*plain
+		Legacy string `json:"opencode_session_id"`
+	}
+	v.plain = (*plain)(r)
+	if err := json.Unmarshal(b, &v); err != nil {
+		return err
+	}
+	if r.Session == "" {
+		r.Session = v.Legacy
 	}
 	return nil
 }

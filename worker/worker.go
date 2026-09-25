@@ -31,7 +31,7 @@ func Open() (*App, error) {
 	if e != nil {
 		return nil, e
 	}
-	return &App{ConfigPath: c, Store: s, Engine: runner.OpenCode{}, Debug: os.Getenv("CODING_WORKER_DEBUG") == "1"}, nil
+	return &App{ConfigPath: c, Store: s, Debug: os.Getenv("CODING_WORKER_DEBUG") == "1"}, nil
 }
 
 type ImplementRequest struct {
@@ -49,21 +49,30 @@ type ContinueRequest struct {
 	Acceptance []string `json:"acceptance_criteria,omitempty"`
 }
 type Result struct {
-	RunID      string              `json:"run_id"`
-	Operation  string              `json:"operation,omitempty"`
-	State      string              `json:"state"`
-	Workspace  workspace.Workspace `json:"workspace"`
-	Config     config.Resolved     `json:"config"`
-	Provider   string              `json:"provider"`
-	Session    string              `json:"opencode_session_id"`
-	Iterations int                 `json:"iteration_count"`
-	Started    time.Time           `json:"started_at"`
-	Finished   *time.Time          `json:"finished_at"`
-	Latest     *store.Iteration    `json:"latest,omitempty"`
-	Reviews    []store.Review      `json:"reviews"`
-	Error      string              `json:"error,omitempty"`
+	BackendVersion string              `json:"backend_version,omitempty"`
+	LegacySession  string              `json:"opencode_session_id,omitempty"`
+	RunID          string              `json:"run_id"`
+	Operation      string              `json:"operation,omitempty"`
+	State          string              `json:"state"`
+	Workspace      workspace.Workspace `json:"workspace"`
+	Config         config.Resolved     `json:"config"`
+	Provider       string              `json:"provider"`
+	Session        string              `json:"session_id"`
+	Iterations     int                 `json:"iteration_count"`
+	Started        time.Time           `json:"started_at"`
+	Finished       *time.Time          `json:"finished_at"`
+	Latest         *store.Iteration    `json:"latest,omitempty"`
+	Reviews        []store.Review      `json:"reviews"`
+	Error          string              `json:"error,omitempty"`
 }
 
+// Engine is an optional test override; production resolves each saved profile independently.
+func (a *App) engine(p config.Profile) runner.Engine {
+	if a.Engine != nil {
+		return a.Engine
+	}
+	return runner.For(p.Engine)
+}
 func (a *App) lock(root string) (*os.File, error) {
 	return workspace.Lock(filepath.Join(a.Store.Dir, "locks"), root)
 }
@@ -142,7 +151,7 @@ func (a *App) Continue(ctx context.Context, in ContinueRequest) (Result, error) 
 		return Result{}, fmt.Errorf("use the matching investigation tool; verification requires a new run")
 	}
 	if r.Session == "" {
-		return Result{}, fmt.Errorf("run has no resumable OpenCode session")
+		return Result{}, fmt.Errorf("run has no resumable backend session")
 	}
 	before, e := workspace.Capture(ctx, w.Root)
 	if e != nil {
@@ -167,11 +176,16 @@ func (a *App) execute(ctx context.Context, r *store.Run, before workspace.Snapsh
 	if e := a.Store.Save(r); e != nil {
 		return Result{}, e
 	}
-	req := runner.Request{CWD: r.Workspace.Root, Prompt: prompt, Profile: r.Config.Profile, Lock: lock}
+	req := runner.Request{BackendVersion: r.BackendVersion, CWD: r.Workspace.Root, Prompt: prompt, Profile: r.Config.Profile, Lock: lock}
+	if r.Config.Profile.Engine == "pi" {
+		req.RuntimeDir = filepath.Join(a.Store.Dir, "pi", r.ID)
+	}
 	if investigation(r.Operation) {
 		req.ReadOnly = true
 		req.RuntimeDir = filepath.Join(a.Store.Dir, "explore", r.ID)
-		req.Profile.Agent = runner.ExploreAgent + "-" + r.ID
+		if r.Config.Profile.Engine == "opencode" {
+			req.Profile.Agent = runner.ExploreAgent + "-" + r.ID
+		}
 	}
 	req.Review = r.Operation == "review"
 	req.Reproduction = repro
@@ -199,7 +213,7 @@ func (a *App) execute(ctx context.Context, r *store.Run, before workspace.Snapsh
 func (a *App) invoke(ctx context.Context, r *store.Run, req runner.Request, resume bool) (Result, error) {
 	idx := len(r.Iterations) - 1
 	if a.Debug {
-		req.Event = func(b json.RawMessage) error { return a.Store.Event(r.ID, idx+1, "opencode", b) }
+		req.Event = func(b json.RawMessage) error { return a.Store.Event(r.ID, idx+1, r.Config.Profile.Engine, b) }
 	}
 	slog.Info("worker started", "run_id", r.ID, "worktree", r.Workspace.Root, "profile", r.Config.Name, "model", r.Config.Profile.Model)
 	var result runner.Result
@@ -227,9 +241,9 @@ func (a *App) invoke(ctx context.Context, r *store.Run, req runner.Request, resu
 	if runErr != nil {
 		result.Exit = -1
 	} else if resume {
-		result, runErr = a.Engine.Continue(ctx, r.Session, req)
+		result, runErr = a.engine(r.Config.Profile).Continue(ctx, r.Session, req)
 	} else {
-		result, runErr = a.Engine.Start(ctx, req)
+		result, runErr = a.engine(r.Config.Profile).Start(ctx, req)
 	}
 	if investigation(r.Operation) && runErr == nil {
 		runErr = a.phase(r, "validating")
@@ -239,6 +253,9 @@ func (a *App) invoke(ctx context.Context, r *store.Run, req runner.Request, resu
 	}
 	now := time.Now().UTC()
 	r.Finished = &now
+	if result.BackendVersion != "" {
+		r.BackendVersion = result.BackendVersion
+	}
 	if result.Session != "" {
 		r.Session = result.Session
 	}
@@ -304,7 +321,10 @@ func (a *App) invoke(ctx context.Context, r *store.Run, req runner.Request, resu
 }
 func (a *App) view(r store.Run) (Result, error) {
 	reviews, e := a.Store.Reviews(r.ID)
-	v := Result{RunID: r.ID, Operation: r.Operation, State: r.State, Workspace: r.Workspace, Config: r.Config, Provider: r.Provider, Session: r.Session, Iterations: len(r.Iterations), Started: r.Started, Finished: r.Finished, Reviews: reviews}
+	v := Result{BackendVersion: r.BackendVersion, RunID: r.ID, Operation: r.Operation, State: r.State, Workspace: r.Workspace, Config: r.Config, Provider: r.Provider, Session: r.Session, Iterations: len(r.Iterations), Started: r.Started, Finished: r.Finished, Reviews: reviews}
+	if r.Config.Profile.Engine == "opencode" {
+		v.LegacySession = r.Session
+	}
 	if len(r.Iterations) > 0 {
 		i := r.Iterations[len(r.Iterations)-1]
 		i.Before.Diff = ""
