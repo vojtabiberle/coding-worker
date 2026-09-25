@@ -4,7 +4,7 @@
 
 ## Install
 
-Requires Linux or macOS, Go 1.26+, a C compiler for SQLite, Git, and OpenCode on PATH. Windows is not supported; use WSL. Build and install both executables:
+Requires Linux or macOS, Go 1.26+, a C compiler for SQLite, Git, and the selected backend on PATH. Windows is not supported; use WSL. Build and install both executables:
 
 ```sh
 git clone https://github.com/vojtabiberle/coding-worker.git
@@ -70,7 +70,7 @@ Paths honor `XDG_CONFIG_HOME` and `XDG_DATA_HOME`. `CODING_WORKER_CONFIG` select
 
 ## MCP setup
 
-Build/install first. Replace `/home/YOU` with your actual home path; use an absolute executable path because desktop clients may have a different PATH. Ensure `opencode` is on the server's PATH too.
+Build/install first. Replace `/home/YOU` with your actual home path; use an absolute executable path because desktop clients may have a different PATH. Ensure the selected backend (`opencode` or `pi`) is on the server's PATH too.
 
 Codex CLI and desktop: add to `~/.codex/config.toml`:
 
@@ -104,3 +104,34 @@ Equivalent server entry inside `mcpServers` (user scope is stored in `~/.claude.
 ```
 
 MCP execution tools return after validation, repository capture, persistence and scheduling, before model/command completion. Request cancellation after acceptance does not cancel the background job. Stopping the stdio server cancels its active process groups and waits for final persistence. Each client launches a small stdio server; these processes share the same database and locks. No daemon or listening port is needed. MCP stdout contains protocol messages only; structured lifecycle logs go to stderr.
+
+## Pi backend
+
+Supported Pi version: **0.78.1**, deliberately pinned because event and extension contracts affect isolation and completion detection. Other versions fail explicitly; no fallback to another backend occurs. The npm package requires Node.js 22.19.0 or newer:
+
+```sh
+npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.78.1
+pi --version
+pi --list-models
+```
+
+Configure authentication using Pi's normal login/environment mechanisms, then add a worker profile:
+
+```toml
+[profiles.pi]
+engine = "pi"
+model = "anthropic/REPLACE_WITH_EXACT_MODEL_ID"
+max_steps = 30
+```
+
+Install `rg` (ripgrep) and `fd` or `fdfind` on the MCP server's PATH for Pi search tools (Debian/Ubuntu packages: `ripgrep fd-find`). Automatic tool downloads are disabled; missing search binaries produce tool errors.
+
+Choose it through the existing MCP `profile` parameter, CLI `--profile pi`, or repository profile file. Omit `agent`: it is OpenCode-only and rejected for Pi. The selected provider/model must resolve exactly, not through Pi's fuzzy model fallback. Run `workerctl doctor` after selecting the profile.
+
+Each run has private Pi state outside the worktree. The adapter snapshots `auth.json` and `models.json` from `PI_CODING_AGENT_DIR` (default `~/.pi/agent`) on the first invocation; it preserves them on continuation. Custom endpoints and environment-key references in Pi's `models.json` therefore work without saving a key in Pi auth. Global settings, discovered extensions, skills, themes and prompt templates are not copied or loaded. Repository instruction-file discovery is disabled for investigations and retained for implementation. The bundled worker policy is the only explicit extension.
+
+`max_steps` caps provider requests per invocation, including any extra requests, before the next request is sent. Exhaustion fails the iteration and retains any persisted session/partial work; it does not reserve a final summary request. Automatic compaction and retry are disabled in private settings. Pi 0.78.1 still reads project `.pi/settings.json`: the worker rejects malformed settings or explicit enablement of retry/compaction before calling the provider. Investigations replace the system prompt; implementation appends worker instructions. These semantics differ from OpenCode's final-summary step behavior. Environment variables are resolved again in each process; avoid changing credentials mid-run. Profile-level provider overrides and Git-config profile selection remain roadmap items.
+
+Pi uses one JSON-mode process per invocation, with prompts on stdin, an exact session file for continuation and process-group cancellation. The adapter validates final assistant output and error events rather than trusting exit status alone. Exploration, diagnosis and review retain Linux/Bubblewrap requirements and allow only read/grep/find/ls inside the worktree, with resolved-path checks. Harness-supplied reproduction observations remain in the prompt. Implementation is not an OS sandbox; its shell tools have your user permissions.
+
+Private run directories contain credentials and sessions: treat the shared worker data directory as sensitive. New results use `session_id` and record Pi's `backend_version`; old `opencode_session_id` records remain readable, and OpenCode implementation responses retain that legacy top-level alias. Pi session IDs are exact file paths and are never passed to OpenCode.

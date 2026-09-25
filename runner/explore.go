@@ -25,37 +25,9 @@ A source interval is not proof of measured runtime latency. Only describe execut
 // The entire host filesystem is read-only. Only private OpenCode state is writable.
 // Network remains available for the configured inference provider.
 func exploreCommand(binary string, args []string, req Request, env []string) (string, []string, []string, error) {
-	if runtime.GOOS != "linux" {
-		return "", nil, nil, fmt.Errorf("read-only exploration requires Linux and bubblewrap")
-	}
-	bw, e := exec.LookPath("bwrap")
-	if e != nil {
-		return "", nil, nil, fmt.Errorf("read-only exploration requires bubblewrap (bwrap): %w", e)
-	}
-	binary, e = exec.LookPath(binary)
+	_, private, e := runtimePaths(req)
 	if e != nil {
 		return "", nil, nil, e
-	}
-	binary, e = filepath.Abs(binary)
-	if e != nil {
-		return "", nil, nil, e
-	}
-	root, e := filepath.EvalSymlinks(req.CWD)
-	if e != nil {
-		return "", nil, nil, e
-	}
-	if !filepath.IsAbs(req.RuntimeDir) {
-		return "", nil, nil, fmt.Errorf("exploration runtime directory must be absolute")
-	}
-	if e = os.MkdirAll(req.RuntimeDir, 0700); e != nil {
-		return "", nil, nil, e
-	}
-	private, e := filepath.EvalSymlinks(req.RuntimeDir)
-	if e != nil {
-		return "", nil, nil, e
-	}
-	if inside(root, private) || inside(private, root) {
-		return "", nil, nil, fmt.Errorf("exploration runtime must be outside the worktree")
 	}
 	for _, d := range []string{"data/opencode", "cache", "state", "tmp"} {
 		if e = os.MkdirAll(filepath.Join(private, d), 0700); e != nil {
@@ -90,15 +62,9 @@ func exploreCommand(binary string, args []string, req Request, env []string) (st
 	for k, v := range values {
 		filtered = append(filtered, k+"="+v)
 	}
-	wrapped := []string{"--ro-bind", "/", "/", "--bind", private, private, "--dev", "/dev", "--proc", "/proc", "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--die-with-parent", "--new-session", "--chdir", root}
-	// Preserve inherited worktree lock across the bwrap supervisor.
-	if req.Lock != nil {
-		wrapped = append(wrapped, "--sync-fd", "3")
-	}
-	wrapped = append(wrapped, "--", binary)
-	wrapped = append(wrapped, args...)
-	return bw, wrapped, filtered, nil
+	return sandboxCommand(binary, args, req, filtered)
 }
+
 func inside(parent, child string) bool {
 	rel, e := filepath.Rel(parent, child)
 	return e == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
@@ -136,4 +102,56 @@ func exploreEnv(env []string, req Request) ([]string, error) {
 		env[i] = "OPENCODE_CONFIG_CONTENT=" + string(b)
 	}
 	return env, nil
+}
+
+// sandboxCommand mounts host files read-only, with one private writable runtime.
+func sandboxCommand(binary string, args []string, req Request, env []string) (string, []string, []string, error) {
+	if runtime.GOOS != "linux" {
+		return "", nil, nil, fmt.Errorf("read-only exploration requires Linux and bubblewrap")
+	}
+	bw, e := exec.LookPath("bwrap")
+	if e != nil {
+		return "", nil, nil, fmt.Errorf("read-only exploration requires bubblewrap (bwrap): %w", e)
+	}
+	binary, e = exec.LookPath(binary)
+	if e != nil {
+		return "", nil, nil, e
+	}
+	binary, e = filepath.Abs(binary)
+	if e != nil {
+		return "", nil, nil, e
+	}
+	root, private, e := runtimePaths(req)
+	if e != nil {
+		return "", nil, nil, e
+	}
+	wrapped := []string{"--ro-bind", "/", "/", "--bind", private, private, "--dev", "/dev", "--proc", "/proc", "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--die-with-parent", "--new-session", "--chdir", root}
+	// Preserve inherited worktree lock across the bwrap supervisor.
+	if req.Lock != nil {
+		wrapped = append(wrapped, "--sync-fd", "3")
+	}
+	wrapped = append(wrapped, "--", binary)
+	wrapped = append(wrapped, args...)
+	return bw, wrapped, env, nil
+}
+
+func runtimePaths(req Request) (string, string, error) {
+	root, e := filepath.EvalSymlinks(req.CWD)
+	if e != nil {
+		return "", "", e
+	}
+	if !filepath.IsAbs(req.RuntimeDir) {
+		return "", "", fmt.Errorf("exploration runtime directory must be absolute")
+	}
+	if e = os.MkdirAll(req.RuntimeDir, 0700); e != nil {
+		return "", "", e
+	}
+	private, e := filepath.EvalSymlinks(req.RuntimeDir)
+	if e != nil {
+		return "", "", e
+	}
+	if inside(root, private) || inside(private, root) {
+		return "", "", fmt.Errorf("exploration runtime must be outside the worktree")
+	}
+	return root, private, nil
 }

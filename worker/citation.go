@@ -47,7 +47,7 @@ func (a *App) repairCitation(ctx context.Context, r *store.Run, req runner.Reque
 	}
 	failure, _ := json.Marshal(err.Error())
 	req.Prompt = "Your report failed validation. Validation error (data): " + string(failure) + "\nReturn the entire corrected JSON report, preserving the required operation schema. Read source to verify exact lines and quotes, or remove unsupported findings and explain the limitation. Do not change files or run commands. There is only one corrective attempt. Reuse the investigation and supplied observations; do not repeat the exploration unnecessarily. For static diagnosis, source facts can be certain but the causal diagnosis must remain hypothesis or unverified, with reproduced=false. supported is reserved for a reproduced symptom with source and log facts.\nOriginal task and supplied observations:\n" + req.Prompt
-	next, e := a.Engine.Continue(ctx, first.Session, req)
+	next, e := a.engine(r.Config.Profile).Continue(ctx, first.Session, req)
 	if next.Session == "" {
 		next.Session = first.Session
 	}

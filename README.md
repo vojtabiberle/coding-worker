@@ -16,7 +16,7 @@ Runs return an ID promptly. Wait for completion with `worker_wait`, retrieve evi
 
 ## Install
 
-Requires Go 1.26+, a C compiler, Git, and OpenCode on `PATH` for model-backed operations. Implementation supports Linux/macOS; exploration, diagnosis, verification and review require **Linux with Bubblewrap and working user namespaces**. Windows users need WSL.
+Requires Go 1.26+, a C compiler, Git, and the selected backend (OpenCode or Pi 0.78.1) on `PATH` for model-backed operations. Implementation supports Linux/macOS; exploration, diagnosis, verification and review require **Linux with Bubblewrap and working user namespaces**. Windows users need WSL.
 
 ```sh
 git clone https://github.com/vojtabiberle/coding-worker.git
@@ -30,7 +30,7 @@ mkdir -p ~/.config/coding-worker
 cp examples/config.toml ~/.config/coding-worker/config.toml
 ```
 
-Edit the copied configuration to select a model available from your provider. Run `workerctl doctor` inside a Git repository with an initial commit to check setup.
+Edit the copied configuration to select a model available from your provider. For Pi, use an `engine = "pi"` profile without `agent`; see [Pi setup](docs/setup.md#pi-backend). Run `workerctl doctor` inside a Git repository with an initial commit to check setup.
 
 `make install` installs both binaries and the Codex skill. For another agent:
 

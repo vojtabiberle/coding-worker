@@ -66,13 +66,11 @@ End-to-end acceptance: two repositories select different profiles through Git co
 
 ## Multiple coding backends
 
-Support interchangeable coding backends behind the existing MCP operations. Initial candidates: **PI** and **OpenCode 2.x**, alongside the current OpenCode 1.x integration. This is a proposal to evaluate and implement adapters, not a claim that these backends already satisfy the worker contract.
+OpenCode and pinned Pi 0.78.1 adapters now share the existing MCP operations; see [setup and limits](docs/setup.md#pi-backend). Remaining work: evaluate newer Pi versions and OpenCode 2.x, and add profile-level provider overrides.
 
-- Select the backend through a worker profile, keeping MCP tool names and result formats stable. Repository/Git-config profile selection should choose the backend together with its model and credential configuration.
-- Build on the existing Engine interface; extend it only for demonstrated differences. Keep CLI arguments, configuration, authentication, event parsing and session handling inside each adapter.
+- Add Git-config profile selection and profile-level credential overrides on top of existing TOML profile/backend selection.
 - Investigate each backend's noninteractive/API mode, structured output, continuation, cancellation, tool permissions and metrics before promising equivalent operation support. Define capabilities explicitly; reject unsupported operations rather than silently falling back or weakening isolation.
-- Preserve shared orchestration guarantees: asynchronous run IDs, worktree locking, repository freshness, bounded results, evidence validation, corrective attempts, and external acceptance. `worker_verify` remains independent of model backends.
-- Keep backend identity and compatible version information with runs. Continuation must retain the original backend/session; do not silently migrate an in-flight session to a different engine or major version.
+- Define migrations before widening supported Pi versions; preserve the saved backend/session and reject incompatible continuation. Add version metadata to the legacy OpenCode adapter.
 - Translate profile provider/credential settings per backend. Do not assume OpenCode configuration keys or SDK adapters apply to PI; retain secret-free persistence and per-run credential isolation.
 
 ### OpenCode 2.x compatibility
@@ -148,7 +146,7 @@ Open questions: how much command detection can be reliable, when checks should r
 
 ## Suggested order
 
-1. Provider overrides and Git-config profile selection, with credential isolation and explicit precedence; evaluate PI and OpenCode 2.x adapter requirements alongside this design.
+1. Provider overrides and Git-config profile selection, with credential isolation and explicit precedence; evaluate newer Pi versions and OpenCode 2.x compatibility alongside this design.
 2. Repository check discovery/configuration and separate completion evidence for tests, builds, and type checks.
 3. Review integration, change attribution, and branch/base-ref scope.
 4. Explicit cancellation and durable execution/recovery.

@@ -65,14 +65,17 @@ func Load(path string) (Config, error) {
 var nameRE = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 func (p Profile) Validate() error {
-	if p.Engine != "opencode" {
-		return fmt.Errorf("unsupported engine %q (expected opencode)", p.Engine)
+	if p.Engine != "opencode" && p.Engine != "pi" {
+		return fmt.Errorf("unsupported engine %q (expected opencode or pi)", p.Engine)
 	}
 	parts := strings.SplitN(p.Model, "/", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" || strings.ContainsAny(p.Model, " \t\r\n\x00") || strings.HasPrefix(p.Model, "-") {
 		return fmt.Errorf("model must be provider/model")
 	}
-	if !nameRE.MatchString(p.Agent) {
+	if p.Engine == "pi" && p.Agent != "" {
+		return fmt.Errorf("agent is OpenCode-only; omit it for pi")
+	}
+	if p.Engine == "opencode" && !nameRE.MatchString(p.Agent) {
 		return fmt.Errorf("agent must contain only letters, digits, underscores or hyphens")
 	}
 	if p.MaxSteps < 1 {

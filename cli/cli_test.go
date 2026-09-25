@@ -63,3 +63,24 @@ func TestCLI(t *testing.T) {
 	run("experiment", "report", "compare")
 	run("experiment", "stop")
 }
+
+func TestPiDoctor(t *testing.T) {
+	root := testutil.Repo(t)
+	t.Chdir(root)
+	s, e := store.Open(t.TempDir())
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer s.Close()
+	cfg := filepath.Join(t.TempDir(), "config.toml")
+	testutil.Write(t, cfg, "default_profile='pi'\n[profiles.pi]\nengine='pi'\nmodel='fake/model'\nmax_steps=2\n")
+	bin := t.TempDir()
+	path := filepath.Join(bin, "pi")
+	testutil.Write(t, path, "#!/bin/sh\necho 0.78.1 >&2\n")
+	os.Chmod(path, 0700)
+	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+	var out bytes.Buffer
+	if e := Execute(context.Background(), &worker.App{Store: s, ConfigPath: cfg}, []string{"doctor"}, &out); e != nil || !strings.Contains(out.String(), "0.78.1") {
+		t.Fatal(out.String(), e)
+	}
+}

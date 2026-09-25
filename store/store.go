@@ -20,20 +20,21 @@ import (
 )
 
 type Run struct {
-	Phase        string              `json:"phase,omitempty"`
-	LastProgress *time.Time          `json:"last_progress,omitempty"`
-	Operation    string              `json:"operation,omitempty"`
-	ID           string              `json:"run_id"`
-	Origin       string              `json:"origin,omitempty"`
-	Workspace    workspace.Workspace `json:"workspace"`
-	Base         string              `json:"base_sha"`
-	Config       config.Resolved     `json:"config"`
-	Provider     string              `json:"provider"`
-	Session      string              `json:"opencode_session_id"`
-	Started      time.Time           `json:"started_at"`
-	Finished     *time.Time          `json:"finished_at"`
-	State        string              `json:"state"`
-	Iterations   []Iteration         `json:"iterations"`
+	BackendVersion string              `json:"backend_version,omitempty"`
+	Phase          string              `json:"phase,omitempty"`
+	LastProgress   *time.Time          `json:"last_progress,omitempty"`
+	Operation      string              `json:"operation,omitempty"`
+	ID             string              `json:"run_id"`
+	Origin         string              `json:"origin,omitempty"`
+	Workspace      workspace.Workspace `json:"workspace"`
+	Base           string              `json:"base_sha"`
+	Config         config.Resolved     `json:"config"`
+	Provider       string              `json:"provider"`
+	Session        string              `json:"session_id"`
+	Started        time.Time           `json:"started_at"`
+	Finished       *time.Time          `json:"finished_at"`
+	State          string              `json:"state"`
+	Iterations     []Iteration         `json:"iterations"`
 }
 type Iteration struct {
 	State           string               `json:"state,omitempty"`
@@ -478,4 +479,21 @@ func (s *Store) Report(repo, name string) ([]ProfileReport, error) {
 		out = append(out, v)
 	}
 	return out, nil
+}
+
+// UnmarshalJSON keeps runs written before backend-neutral session references readable.
+func (r *Run) UnmarshalJSON(b []byte) error {
+	type plain Run
+	var v struct {
+		*plain
+		Legacy string `json:"opencode_session_id"`
+	}
+	v.plain = (*plain)(r)
+	if err := json.Unmarshal(b, &v); err != nil {
+		return err
+	}
+	if r.Session == "" {
+		r.Session = v.Legacy
+	}
+	return nil
 }

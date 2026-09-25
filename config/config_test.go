@@ -62,3 +62,14 @@ func TestValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestPiProfile(t *testing.T) {
+	p := Profile{Engine: "pi", Model: "provider/model", MaxSteps: 5}
+	if e := p.Validate(); e != nil {
+		t.Fatal(e)
+	}
+	p.Agent = "build"
+	if e := p.Validate(); e == nil {
+		t.Fatal("OpenCode agent silently accepted for Pi")
+	}
+}

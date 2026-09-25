@@ -148,7 +148,7 @@ func status(ctx context.Context, a *worker.App, cwd string, out io.Writer, docto
 	if e != nil {
 		return e
 	}
-	binary, e := exec.LookPath("opencode")
+	binary, e := exec.LookPath(p.Profile.Engine)
 	availability := "unavailable"
 	if e == nil {
 		availability = binary
@@ -169,7 +169,7 @@ func status(ctx context.Context, a *worker.App, cwd string, out io.Writer, docto
 			}
 		}
 	}
-	fmt.Fprintf(out, "Repository:  %s\nWorktree:    %s\nProfile:     %s\nSource:      %s\nEngine:      %s\nModel:       %s\nAgent:       %s\nMax steps:   %d\nSettings:    %s [profiles.%s]\nOpenCode:    %s\nActive runs: %d\n", w.Repository, w.Root, p.Name, p.Source, p.Profile.Engine, p.Profile.Model, p.Profile.Agent, p.Profile.MaxSteps, a.ConfigPath, p.Name, availability, active)
+	fmt.Fprintf(out, "Repository:  %s\nWorktree:    %s\nProfile:     %s\nSource:      %s\nEngine:      %s\nModel:       %s\nAgent:       %s\nMax steps:   %d\nSettings:    %s [profiles.%s]\nExecutable:  %s\nActive runs: %d\n", w.Repository, w.Root, p.Name, p.Source, p.Profile.Engine, p.Profile.Model, p.Profile.Agent, p.Profile.MaxSteps, a.ConfigPath, p.Name, availability, active)
 	experiments, e := a.Store.Experiments(w.Repository)
 	if e != nil {
 		return e
@@ -182,9 +182,9 @@ func status(ctx context.Context, a *worker.App, cwd string, out io.Writer, docto
 	if doctor {
 		ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()
-		v, e := (runner.OpenCode{}).Version(ctx)
+		v, e := runner.Version(ctx, p.Profile.Engine)
 		if e != nil {
-			return fmt.Errorf("install OpenCode and ensure it is on PATH: %w", e)
+			return fmt.Errorf("install %s and ensure it is on PATH: %w", p.Profile.Engine, e)
 		}
 		f, e := os.CreateTemp(a.Store.Dir, "doctor-*")
 		if e != nil {

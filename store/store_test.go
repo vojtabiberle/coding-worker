@@ -1,9 +1,11 @@
 package store
 
 import (
+	"encoding/json"
 	"github.com/vojtabiberle/coding-worker/config"
 	"github.com/vojtabiberle/coding-worker/runner"
 	"github.com/vojtabiberle/coding-worker/workspace"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -120,5 +122,16 @@ func TestConcurrentAssignment(t *testing.T) {
 	}
 	if counts["a"] != 10 || counts["b"] != 10 {
 		t.Fatal(counts)
+	}
+}
+
+func TestLegacyRunSession(t *testing.T) {
+	var run Run
+	if e := json.Unmarshal([]byte(`{"opencode_session_id":"old","iterations":[{"result":{"opencode_session_id":"old"}}]}`), &run); e != nil || run.Session != "old" || run.Iterations[0].Result.Session != "old" {
+		t.Fatal(run, e)
+	}
+	b, e := json.Marshal(run)
+	if e != nil || !strings.Contains(string(b), `"session_id":"old"`) || strings.Contains(string(b), "opencode_session_id") {
+		t.Fatal(string(b), e)
 	}
 }
