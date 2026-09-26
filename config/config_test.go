@@ -73,3 +73,18 @@ func TestPiProfile(t *testing.T) {
 		t.Fatal("OpenCode agent silently accepted for Pi")
 	}
 }
+func TestEngineDefaultsToPi(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.toml")
+	os.WriteFile(p, []byte("default_profile='a'\n[profiles.a]\nmodel='test/a'\nmax_steps=3\n[profiles.b]\nengine='opencode'\nmodel='test/b'\nagent='build'\nmax_steps=3\n"), 0600)
+	c, e := Load(p)
+	if e != nil {
+		t.Fatal(e)
+	}
+	r, e := c.Resolve(t.TempDir(), "")
+	if e != nil || r.Profile.Engine != "pi" {
+		t.Fatalf("%+v %v", r, e)
+	}
+	if c.Profiles["b"].Engine != "opencode" {
+		t.Fatal("explicit engine overridden")
+	}
+}

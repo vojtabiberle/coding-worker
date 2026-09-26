@@ -8,18 +8,18 @@ Execution tools first return a `run_id` acknowledgement. The table describes the
 
 | Tool | Final result / response | Execution and continuation |
 | --- | --- | --- |
-| `worker_implement` | Run/session IDs, workspace/profile, latest iteration, change summary, reported checks, metrics and reviews | Writes code; new absolute `cwd` and `objective`; no commit/push |
+| `worker_implement` | Compact summary: files, line counts, untracked files, clipped report, tests, failures, failed commands, metrics and latest review; `detail:true` returns the full iteration | Writes code; new absolute `cwd` and `objective`; no commit/push |
 | `worker_continue` | Updated implementation result | Same implementation session with `run_id` and `feedback`; rejects repository drift |
 | `worker_explore` | Answer, fact/hypothesis/unverified findings, source locations and hashes | Read-only; new `cwd`/`question`, follow-up `run_id`/`question` |
 | `worker_diagnose` | Cause status, reproduction assessment, proposed minimal fix, source/log evidence | Optional explicit reproduction command; same-session follow-up; no fix applied |
 | `worker_verify` | Check outcome, exit status, duration, bounded log excerpt and freshness | One explicit command per new run, no model; no session continuation |
 | `worker_review` | Findings with severity, reason and source/diff evidence | Read-only working-tree review against HEAD; includes untracked files; same-session follow-up |
-| `worker_wait` | Run ID, iteration, latest iteration, state, done/timed_out, phase and available last_progress | Waits up to 60 seconds; no report, logs or freshness check |
+| `worker_wait` | Run ID, iteration, latest iteration, state, done/timed_out, phase and available last_progress | Waits up to 600 seconds; no report, logs or freshness check |
 | `worker_status` | Run ID, state, operation, iteration count, timestamps, phase/last_progress and applicable freshness | No report or full logs; does not rerun work |
-| `worker_result` | Stored implementation result, investigation findings, verification summary or log page | Does not rerun work; `detail`/`finding_offset` for findings, `log`/`log_offset` for diagnosis/verification logs |
+| `worker_result` | Stored implementation summary, investigation findings, verification summary, log page or worktree diff page | Does not rerun work; `detail`/`finding_offset` for findings, `log`/`log_offset` for logs, `diff`/`paths`/`diff_offset` for the diff |
 | `worker_record_review` | `recorded: true` on success | Records an external verdict: `accepted`, `changes_requested`, or `rejected` |
 
-Investigation and verification responses default to a conservative **800 UTF-8 JSON byte** budget (`max_output_bytes`, range 512–8192), with one text payload and no duplicated structured report. This budget does not apply to implementation results. Finding pagination uses `more`/`next_offset`; log pagination uses one-based byte offsets and `next_offset`. Complete validated reports stay in SQLite; retained command logs stay in private files (8 MiB cap, truncation flagged).
+Investigation and verification responses default to a conservative **800 UTF-8 JSON byte** budget (`max_output_bytes`, range 512–8192), with one text payload and no duplicated structured report. Implementation results are a compact summary instead (report clipped to 2000 bytes, only failed commands listed); `detail:true` returns the full stored iteration. Finding pagination uses `more`/`next_offset`; log pagination uses one-based byte offsets and `next_offset`. Complete validated reports stay in SQLite; retained command logs stay in private files (8 MiB cap, truncation flagged).
 
 New runs require absolute `cwd`. Explore/diagnose/review follow-ups omit `cwd` and `profile`, retaining the original session and model. They reject stale or unverifiable repository state. Verification always starts a new run. Execution tools return `run_id` and `state: running`; wait for completion with `worker_wait`, then retrieve `worker_result`. Preflight (including Git capture) remains synchronous. A request timeout does not establish cancellation or failure; recover status/results before resubmitting.
 
@@ -40,6 +40,16 @@ Example implementation request:
 ```
 
 MCP execution calls return after scheduling; other connections can inspect active runs. Preflight errors include `state: "busy"` on lock contention. Background failures are retrieved by run ID through `worker_result`. Do not equate a completed execution with accepted implementation. External reviewers record acceptance.
+
+## Reviewing an implementation
+
+`worker_result` with `diff:true` returns the run worktree's **current** diff against `HEAD`, including untracked files as new-file hunks (binary, oversized and non-regular files are listed without content):
+
+```json
+{"run_id":"RUN_ID","diff":true,"paths":["src/",":!src/generated/"],"max_output_bytes":16384}
+```
+
+`paths` takes Git pathspecs, exclusions included. Pages are cut at line boundaries; `max_output_bytes` (512–65536, default 16384) caps the diff text of one page. Continue with `diff_offset` = the returned `next_offset` while `more` is true. `files` lists every changed path with line counts, `untracked` and `binary` flags. `matches_worker_snapshot:false` means the worktree differs from the state recorded after the worker's latest iteration (someone edited it since); it is absent for runs without an implementation snapshot. The diff is computed on request and is not stored.
 
 ## Read-only exploration
 
@@ -174,7 +184,7 @@ For static diagnosis, source facts may be verified, but `cause_status:supported`
 {"run_id":"RUN_ID","timeout_seconds":45,"iteration":1}
 ```
 
-`worker_wait` waits for one iteration, returning immediately if already finished. Omit `iteration` to select the latest at call entry; repeat subsequent waits with the returned number. `timeout_seconds` defaults to 45 (0 also selects the default); allowed nonzero values are 1–60. Choose a duration below the client's tool timeout.
+`worker_wait` waits for one iteration, returning immediately if already finished. Omit `iteration` to select the latest at call entry; repeat subsequent waits with the returned number. `timeout_seconds` defaults to 45 (0 also selects the default); allowed nonzero values are 1–600. Choose the longest duration below the client's tool timeout: every repeated wait is another model turn for the calling agent, which re-reads its whole context.
 
 The compact response contains `run_id`, `iteration`, `latest_iteration`, `state`, `done`, `timed_out`, `phase` and available `last_progress`. `done:true` means execution ended, including failed, cancelled or interrupted states; it does not imply success or acceptance. `timed_out:true` means the wait expired while work was still pending. Repeat the wait without resubmitting work. Cancellation of the waiting request also leaves the job running.
 

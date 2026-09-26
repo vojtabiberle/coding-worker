@@ -62,12 +62,15 @@ type ExploreResult struct {
 	Error        string               `json:"error,omitempty"`
 }
 type ResultRequest struct {
-	Log            bool   `json:"log,omitempty" jsonschema:"Retrieve a bounded reproduction.log byte range for a diagnosis or verification run."`
-	LogOffset      int    `json:"log_offset,omitempty" jsonschema:"One-based log byte offset; default 1. Continue with returned next_offset."`
-	RunID          string `json:"run_id"`
-	MaxOutputBytes int    `json:"max_output_bytes,omitempty"`
-	FindingOffset  int    `json:"finding_offset,omitempty" jsonschema:"Zero-based explore/diagnose/review finding index; use returned next_offset."`
-	Detail         bool   `json:"detail,omitempty" jsonschema:"Include investigation evidence quotes and hashes within the output budget."`
+	Log            bool     `json:"log,omitempty" jsonschema:"Retrieve a bounded reproduction.log byte range for a diagnosis or verification run."`
+	LogOffset      int      `json:"log_offset,omitempty" jsonschema:"One-based log byte offset; default 1. Continue with returned next_offset."`
+	RunID          string   `json:"run_id"`
+	MaxOutputBytes int      `json:"max_output_bytes,omitempty"`
+	FindingOffset  int      `json:"finding_offset,omitempty" jsonschema:"Zero-based explore/diagnose/review finding index; use returned next_offset."`
+	Detail         bool     `json:"detail,omitempty" jsonschema:"Findings: include evidence quotes and hashes. Implementation: return the full iteration (commands, snapshots) instead of the compact summary."`
+	Diff           bool     `json:"diff,omitempty" jsonschema:"Return the run worktree's current diff against HEAD, untracked files included, paged by diff_offset."`
+	Paths          []string `json:"paths,omitempty" jsonschema:"Diff only: Git pathspecs to include or exclude, e.g. [\"src/\", \":!tests/\"]."`
+	DiffOffset     int      `json:"diff_offset,omitempty" jsonschema:"Diff only: one-based byte offset; default 1. Continue with returned next_offset."`
 }
 
 func outputBudget(n int) (int, error) {
@@ -431,6 +434,9 @@ func (a *App) QueryResult(ctx context.Context, in ResultRequest) (any, error) {
 	if in.Log {
 		return a.reproductionLog(ctx, in)
 	}
+	if in.Diff {
+		return a.diffPage(ctx, in)
+	}
 	r, e := a.Store.Get(in.RunID)
 	if e != nil {
 		return nil, e
@@ -446,7 +452,11 @@ func (a *App) QueryResult(ctx context.Context, in ResultRequest) (any, error) {
 		return verifyView(ctx, r, in.MaxOutputBytes)
 	}
 	if !investigation(r.Operation) {
-		return a.Result(in.RunID)
+		v, e := a.Result(in.RunID)
+		if e != nil || in.Detail {
+			return v, e
+		}
+		return implementationSummary(v), nil
 	}
 	if _, e = a.Result(in.RunID); e != nil {
 		return nil, e

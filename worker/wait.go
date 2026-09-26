@@ -14,7 +14,7 @@ import (
 type WaitRequest struct {
 	RunID          string `json:"run_id"`
 	Iteration      int    `json:"iteration,omitempty" jsonschema:"One-based iteration to wait for. Omit to bind to the latest iteration at call entry. Reuse the returned iteration on subsequent waits."`
-	TimeoutSeconds int    `json:"timeout_seconds,omitempty" jsonschema:"Wait duration: default 45 seconds, range 1 to 60. Choose less than the MCP client's tool timeout. Timeout stops waiting, not the job."`
+	TimeoutSeconds int    `json:"timeout_seconds,omitempty" jsonschema:"Wait duration: default 45 seconds, range 1 to 600. Use the longest value below the MCP client's tool timeout; each extra wait costs the caller a model turn. Timeout stops waiting, not the job."`
 }
 type WaitResult struct {
 	RunID           string     `json:"run_id"`
@@ -26,6 +26,8 @@ type WaitResult struct {
 	LastProgress    *time.Time `json:"last_progress,omitempty"`
 	LatestIteration int        `json:"latest_iteration"`
 }
+
+const maxWaitSeconds = 600
 
 func (a *App) Wait(ctx context.Context, in WaitRequest) (WaitResult, error) {
 	return a.wait(ctx, in, time.Second)
@@ -41,8 +43,8 @@ func (a *App) wait(ctx context.Context, in WaitRequest, poll time.Duration) (Wai
 	if timeout == 0 {
 		timeout = 45
 	}
-	if timeout < 1 || timeout > 60 {
-		return WaitResult{}, fmt.Errorf("timeout_seconds must be 1 to 60 (0 defaults to 45)")
+	if timeout < 1 || timeout > maxWaitSeconds {
+		return WaitResult{}, fmt.Errorf("timeout_seconds must be 1 to %d (0 defaults to 45)", maxWaitSeconds)
 	}
 	waitCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer cancel()

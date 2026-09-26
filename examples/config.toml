@@ -1,28 +1,19 @@
-default_profile = "glm"
+default_profile = "pi-deepseek"
 
-# Replace model IDs with values available in `opencode models`.
-# "build" is built in. Use "worker" if you already configured that agent.
-[profiles.glm]
-engine = "opencode"
+# Pi is the default backend: profiles without `engine` use Pi 0.78.1.
+# Replace model IDs with exact values from `pi --list-models`; Pi takes no `agent`.
+[profiles.pi-deepseek]
+model = "greenpt/deepseek-v4.1-flash"
+max_steps = 60
+
+[profiles.pi-glm]
 model = "greenpt/glm-5.3"
-agent = "build"
 max_steps = 50
 
-[profiles.glm-flash]
-engine = "opencode"
-model = "greenpt/glm-5.3-flash"
-agent = "build"
-max_steps = 80
-
+# Optional OpenCode backend; replace model IDs with values from `opencode models`.
+# "build" is built in. Use "worker" if you already configured that agent.
 [profiles.deepseek]
 engine = "opencode"
 model = "greenpt/deepseek-v4.1-flash"
 agent = "build"
 max_steps = 60
-
-# Optional Pi backend; replace with an exact model ID from `pi --list-models`.
-# Pi 0.78.1 only; `agent` is intentionally omitted.
-# [profiles.pi]
-# engine = "pi"
-# model = "anthropic/REPLACE_WITH_EXACT_MODEL_ID"
-# max_steps = 30
