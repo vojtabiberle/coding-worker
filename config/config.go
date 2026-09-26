@@ -59,8 +59,17 @@ func Load(path string) (Config, error) {
 	if e != nil {
 		return c, fmt.Errorf("global config: %w", e)
 	}
+	for name, p := range c.Profiles {
+		if p.Engine == "" {
+			p.Engine = DefaultEngine
+			c.Profiles[name] = p
+		}
+	}
 	return c, nil
 }
+
+// DefaultEngine is used by profiles that omit `engine`.
+const DefaultEngine = "pi"
 
 var nameRE = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 

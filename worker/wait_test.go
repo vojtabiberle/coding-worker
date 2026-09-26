@@ -108,7 +108,7 @@ func TestWaitRecoversOrphanAndValidates(t *testing.T) {
 	if e != nil || saved.Finished != nil || saved.Iterations[0].State != "interrupted" {
 		t.Fatal(saved, e)
 	}
-	for _, in := range []WaitRequest{{}, {RunID: "missing"}, {RunID: r.ID, Iteration: -1}, {RunID: r.ID, Iteration: 2}, {RunID: r.ID, TimeoutSeconds: -1}, {RunID: r.ID, TimeoutSeconds: 61}} {
+	for _, in := range []WaitRequest{{}, {RunID: "missing"}, {RunID: r.ID, Iteration: -1}, {RunID: r.ID, Iteration: 2}, {RunID: r.ID, TimeoutSeconds: -1}, {RunID: r.ID, TimeoutSeconds: 601}} {
 		if _, e := a.Wait(context.Background(), in); e == nil {
 			t.Fatal("accepted", in)
 		}

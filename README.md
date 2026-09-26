@@ -16,7 +16,7 @@ Runs return an ID promptly. Wait for completion with `worker_wait`, retrieve evi
 
 ## Install
 
-Requires Go 1.26+, a C compiler, Git, and the selected backend (OpenCode or Pi 0.78.1) on `PATH` for model-backed operations. Implementation supports Linux/macOS; exploration, diagnosis, verification and review require **Linux with Bubblewrap and working user namespaces**. Windows users need WSL.
+Requires Go 1.26+, a C compiler, Git, and the selected backend on `PATH` for model-backed operations: Pi 0.78.1 (default) or OpenCode. Implementation supports Linux/macOS; exploration, diagnosis, verification and review require **Linux with Bubblewrap and working user namespaces**. Windows users need WSL.
 
 ```sh
 git clone https://github.com/vojtabiberle/coding-worker.git
@@ -24,13 +24,13 @@ cd coding-worker
 make install
 export PATH="$HOME/.local/bin:$PATH"
 
-opencode auth login
-opencode models
+npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.78.1
+pi --list-models
 mkdir -p ~/.config/coding-worker
 cp examples/config.toml ~/.config/coding-worker/config.toml
 ```
 
-Edit the copied configuration to select a model available from your provider. For Pi, use an `engine = "pi"` profile without `agent`; see [Pi setup](docs/setup.md#pi-backend). Run `workerctl doctor` inside a Git repository with an initial commit to check setup.
+Edit the copied configuration to select a model available from your provider; configure Pi authentication as described in [Pi setup](docs/setup.md#pi-backend). Profiles without `engine` use Pi. For OpenCode, set `engine = "opencode"` and an `agent`, then run `opencode auth login`. Run `workerctl doctor` inside a Git repository with an initial commit to check setup.
 
 `make install` installs both binaries and the Codex skill. For another agent:
 
@@ -68,15 +68,15 @@ Direct MCP calls follow this sequence:
 ```text
 worker_explore {"cwd":"/absolute/repo","question":"Where is input polling scheduled?"}
 → run_id
-worker_wait {"run_id":"RUN_ID","timeout_seconds":45}
+worker_wait {"run_id":"RUN_ID","timeout_seconds":300}
 → done, iteration, state and phase
 worker_result {"run_id":"RUN_ID","max_output_bytes":4096}
 → report once the run finishes
 ```
 
-If `timed_out:true`, repeat `worker_wait` with its returned `iteration`; retrieve the report when `done:true`. Use `worker_status` for an immediate progress snapshot.
+`timeout_seconds` accepts up to 600; use the longest value below your client's tool timeout, since every repeated wait costs your agent a model turn. If `timed_out:true`, repeat `worker_wait` with its returned `iteration`; retrieve the report when `done:true`. Use `worker_status` for an immediate progress snapshot.
 
-Explore, diagnose and review accept follow-up questions with the same `run_id`. Results default to 800 UTF-8 JSON bytes; request details or a larger budget when needed. Implementation results are not subject to this limit.
+Explore, diagnose and review accept follow-up questions with the same `run_id`. Their results default to 800 UTF-8 JSON bytes; request details or a larger budget when needed. Implementation results are a compact summary by default (`detail:true` for the full iteration), and `diff:true` pages the worktree diff against HEAD, untracked files included, so a reviewing agent loads only what it reads.
 
 For CLI implementation:
 

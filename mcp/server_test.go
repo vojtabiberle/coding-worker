@@ -52,6 +52,12 @@ func TestProtocol(t *testing.T) {
 	if e = json.Unmarshal([]byte(w.Content[0].(*sdk.TextContent).Text), &waited); e != nil || !waited.Done || waited.Iteration != 1 || waited.TimedOut {
 		t.Fatal(waited, e)
 	}
+	for detail, key := range map[bool]string{false: `"commands_run"`, true: `"latest"`} {
+		res, e := cs.CallTool(ctx, &sdk.CallToolParams{Name: "worker_result", Arguments: map[string]any{"run_id": "finished", "detail": detail}})
+		if e != nil || res.IsError || !strings.Contains(res.Content[0].(*sdk.TextContent).Text, key) {
+			t.Fatal(detail, res, e)
+		}
+	}
 	v, e = cs.CallTool(ctx, &sdk.CallToolParams{Name: "worker_status", Arguments: map[string]any{"run_id": "missing"}})
 	if e != nil || !v.IsError {
 		t.Fatal(v, e)

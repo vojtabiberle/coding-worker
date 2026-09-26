@@ -31,27 +31,25 @@ make install-bin                           # binaries only
 
 `PREFIX` controls binaries; `SKILLS_DIR` controls skills independently. It also works with `make install SKILLS_DIR="/path/to/agent/skills"` to install binaries and the skill together. The installed Codex skill is available on the next turn. Updating the skill does not refresh an existing MCP connection: reconnect after updating the server binary to load its current tools and schemas.
 
-Configure OpenCode's provider credentials separately (`opencode auth login`). Check available models with `opencode models`, and agents with `opencode agent list`. This implementation was checked against local OpenCode **1.18.31** and current official CLI documentation. No live model call is part of normal tests.
+Pi is the default backend: install and authenticate it as described in [Pi backend](#pi-backend). OpenCode remains supported: configure its provider credentials separately (`opencode auth login`), check models with `opencode models` and agents with `opencode agent list`. The OpenCode adapter was checked against local OpenCode **1.18.31** and current official CLI documentation. No live model call is part of normal tests.
 
 ```sh
 mkdir -p ~/.config/coding-worker
 cp examples/config.toml ~/.config/coding-worker/config.toml
 ```
 
-Edit the example model IDs to match your configured provider. `greenpt/*` identifiers are user-supplied examples, not verified provider offerings. The example uses OpenCode's built-in `build` agent. Set `agent = "worker"` to use your custom worker agent; existing project agent configuration still applies.
+Edit the example model IDs to match your configured provider. `greenpt/*` identifiers are user-supplied examples, not verified provider offerings. The OpenCode profile in the example uses OpenCode's built-in `build` agent. Set `agent = "worker"` to use your custom worker agent; existing project agent configuration still applies.
 
 ## Configuration
 
 Global profiles live in `~/.config/coding-worker/config.toml`:
 
 ```toml
-default_profile = "glm"
+default_profile = "pi-deepseek"
 
-[profiles.glm]
-engine = "opencode"
-model = "greenpt/glm-5.3"
-agent = "build"
-max_steps = 50
+[profiles.pi-deepseek]            # engine omitted: Pi
+model = "greenpt/deepseek-v4.1-flash"
+max_steps = 60
 
 [profiles.deepseek]
 engine = "opencode"
@@ -60,7 +58,9 @@ agent = "build"
 max_steps = 60
 ```
 
-Each physical worktree may have `.coding-worker.toml` containing `profile = "glm"`. `.coding-worker.local.toml` overrides that file; **add it to your project's `.gitignore`**. `workerctl profile use` preserves unrelated TOML fields and comments, and refuses unusual profile syntax rather than rewriting it. It rejects symlink config destinations.
+`engine` is `pi` or `opencode`; a profile that omits it uses Pi. `agent` is required for OpenCode and rejected for Pi.
+
+Each physical worktree may have `.coding-worker.toml` containing `profile = "deepseek"`. `.coding-worker.local.toml` overrides that file; **add it to your project's `.gitignore`**. `workerctl profile use` preserves unrelated TOML fields and comments, and refuses unusual profile syntax rather than rewriting it. It rejects symlink config destinations.
 
 Precedence: explicit invocation profile > local file > project file > global default. All config files are parsed even with an explicit override, so malformed configuration fails visibly. Profile fields come from the selected global profile; project files select a profile rather than redefining fields.
 
@@ -80,7 +80,7 @@ command = "/home/YOU/.local/bin/coding-worker"
 tool_timeout_sec = 1800
 ```
 
-Or register with `codex mcp add coding-worker -- /home/YOU/.local/bin/coding-worker`, then set the longer tool timeout in TOML. Execution runs asynchronously; the client timeout covers preflight and acknowledgement, not the full model run. `worker_wait` defaults to 45 seconds (maximum 60); keep its duration below the client tool timeout. Repeated wait timeouts do not stop background work.
+Or register with `codex mcp add coding-worker -- /home/YOU/.local/bin/coding-worker`, then set the longer tool timeout in TOML. Execution runs asynchronously; the client timeout covers preflight and acknowledgement, not the full model run. `worker_wait` defaults to 45 seconds (maximum 600); use the longest duration below the client tool timeout, e.g. 600 with `tool_timeout_sec = 1800`, because each repeated wait is another model turn. Repeated wait timeouts do not stop background work.
 
 Claude Code, globally:
 
@@ -107,7 +107,7 @@ MCP execution tools return after validation, repository capture, persistence and
 
 ## Pi backend
 
-Supported Pi version: **0.78.1**, deliberately pinned because event and extension contracts affect isolation and completion detection. Other versions fail explicitly; no fallback to another backend occurs. The npm package requires Node.js 22.19.0 or newer:
+Pi is the default backend: profiles without `engine` use it. Supported Pi version: **0.78.1**, deliberately pinned because event and extension contracts affect isolation and completion detection. Other versions fail explicitly; no fallback to another backend occurs. The npm package requires Node.js 22.19.0 or newer:
 
 ```sh
 npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.78.1
@@ -119,14 +119,13 @@ Configure authentication using Pi's normal login/environment mechanisms, then ad
 
 ```toml
 [profiles.pi]
-engine = "pi"
 model = "anthropic/REPLACE_WITH_EXACT_MODEL_ID"
 max_steps = 30
 ```
 
 Install `rg` (ripgrep) and `fd` or `fdfind` on the MCP server's PATH for Pi search tools (Debian/Ubuntu packages: `ripgrep fd-find`). Automatic tool downloads are disabled; missing search binaries produce tool errors.
 
-Choose it through the existing MCP `profile` parameter, CLI `--profile pi`, or repository profile file. Omit `agent`: it is OpenCode-only and rejected for Pi. The selected provider/model must resolve exactly, not through Pi's fuzzy model fallback. Run `workerctl doctor` after selecting the profile.
+Make it `default_profile`, or choose it through the MCP `profile` parameter, CLI `--profile pi`, or a repository profile file. Omit `agent`: it is OpenCode-only and rejected for Pi. The selected provider/model must resolve exactly, not through Pi's fuzzy model fallback. Run `workerctl doctor` after selecting the profile.
 
 Each run has private Pi state outside the worktree. The adapter snapshots `auth.json` and `models.json` from `PI_CODING_AGENT_DIR` (default `~/.pi/agent`) on the first invocation; it preserves them on continuation. Custom endpoints and environment-key references in Pi's `models.json` therefore work without saving a key in Pi auth. Global settings, discovered extensions, skills, themes and prompt templates are not copied or loaded. Repository instruction-file discovery is disabled for investigations and retained for implementation. The bundled worker policy is the only explicit extension.
 
