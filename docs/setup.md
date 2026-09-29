@@ -78,9 +78,12 @@ Codex CLI and desktop: add to `~/.codex/config.toml`:
 [mcp_servers.coding-worker]
 command = "/home/YOU/.local/bin/coding-worker"
 tool_timeout_sec = 1800
+env = { CODING_WORKER_WAIT_SECONDS = "300" }
 ```
 
-Or register with `codex mcp add coding-worker -- /home/YOU/.local/bin/coding-worker`, then set the longer tool timeout in TOML. Execution runs asynchronously; the client timeout covers preflight and acknowledgement, not the full model run. `worker_wait` defaults to 45 seconds (maximum 600); use the longest duration below the client tool timeout, e.g. 600 with `tool_timeout_sec = 1800`, because each repeated wait is another model turn. Repeated wait timeouts do not stop background work.
+Or register with `codex mcp add coding-worker -- /home/YOU/.local/bin/coding-worker`, then add the timeout and environment setting above. Execution runs asynchronously. The client timeout covers each tool call, including `worker_wait`, not the full background model run.
+
+`CODING_WORKER_WAIT_SECONDS` sets the default wait for this MCP server process (integer 1–600; unset means 45). Invalid values, including an empty string, fail server startup. Choose a value comfortably below the client's tool timeout; the Codex example uses 300 seconds with an 1800-second client timeout. Other clients can keep the compatible 45-second default or configure their own value after setting a sufficiently long client timeout. The server advertises its effective default in the tool description and input schema; agents normally omit `timeout_seconds`. Explicit 1–600 values override the default; 0 selects it. Completion returns immediately, and wait timeouts do not stop background work. Reconnect after changing the setting.
 
 Claude Code, globally:
 

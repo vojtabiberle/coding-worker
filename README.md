@@ -49,6 +49,8 @@ Use an absolute binary path. For Codex, add to `~/.codex/config.toml`:
 ```toml
 [mcp_servers.coding-worker]
 command = "/home/YOU/.local/bin/coding-worker"
+tool_timeout_sec = 1800
+env = { CODING_WORKER_WAIT_SECONDS = "300" }
 ```
 
 For Claude Code:
