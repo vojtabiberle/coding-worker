@@ -33,10 +33,10 @@ Example MCP sequence (tool names identify separate calls):
 worker_explore {"cwd":"/absolute/repo","question":"Where is input polling scheduled?"}
 → {"run_id":"RUN_ID","state":"running", ...}
 
-worker_wait {"run_id":"RUN_ID","timeout_seconds":45}
+worker_wait {"run_id":"RUN_ID"}
 → {"iteration":1,"done":false,"timed_out":true,"state":"running", ...}
 
-worker_wait {"run_id":"RUN_ID","iteration":1,"timeout_seconds":45}
+worker_wait {"run_id":"RUN_ID","iteration":1}
 → {"iteration":1,"done":true,"timed_out":false,"state":"completed", ...}
 
 # After state becomes completed, failed, cancelled or interrupted:

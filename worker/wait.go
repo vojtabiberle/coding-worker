@@ -14,7 +14,7 @@ import (
 type WaitRequest struct {
 	RunID          string `json:"run_id"`
 	Iteration      int    `json:"iteration,omitempty" jsonschema:"One-based iteration to wait for. Omit to bind to the latest iteration at call entry. Reuse the returned iteration on subsequent waits."`
-	TimeoutSeconds int    `json:"timeout_seconds,omitempty" jsonschema:"Wait duration: default 45 seconds, range 1 to 600. Use the longest value below the MCP client's tool timeout; each extra wait costs the caller a model turn. Timeout stops waiting, not the job."`
+	TimeoutSeconds int    `json:"timeout_seconds,omitempty" jsonschema:"Wait duration in seconds. Omit or use 0 for the server default; explicit values range from 1 to 600. Timeout stops waiting, not the job."`
 }
 type WaitResult struct {
 	RunID           string     `json:"run_id"`

@@ -33,7 +33,7 @@ Delegation pays when the worker absorbs more of your work than it costs you to b
 | Run a known check without a model | `worker_verify` (`command` argv) |
 | Preliminary review of current changes | `worker_review` |
 
-Every execution tool returns a `run_id` at once. Call `worker_wait` with the longest `timeout_seconds` below your tool timeout (max 600) and repeat with the returned `iteration` while `timed_out` is true; then `worker_result`. `done:true` includes failure and cancellation. A wait timeout or request cancellation does not stop the job: never resubmit a run whose ID you know; inspect it with `worker_status`/`worker_result`. All operations share a worktree lock (`busy` means wait); do not edit or run mutating commands in a worktree while the worker writes.
+Every execution tool returns a `run_id` at once. Call `worker_wait`, normally omitting `timeout_seconds` to use the configured server default; override it for a deliberately shorter wait. Repeat with the returned `iteration` while `timed_out` is true; then `worker_result`. `done:true` includes failure and cancellation. A wait timeout or request cancellation does not stop the job: never resubmit a run whose ID you know; inspect it with `worker_status`/`worker_result`. All operations share a worktree lock (`busy` means wait); do not edit or run mutating commands in a worktree while the worker writes.
 
 Investigation and verification sandboxes are read-only with no network; checks that write into the repository fail there. Results default to 800 bytes (`max_output_bytes` up to 8192); page findings with `finding_offset`, logs with `log`/`log_offset`. A failed or cancelled run may leave useful partial edits: inspect them before starting another.
 
@@ -41,7 +41,7 @@ Investigation and verification sandboxes are read-only with no network; checks t
 
 1. `worker_result` for an implementation returns a compact summary: files, line counts, untracked files, clipped report, tests, failures and failed commands only. Use `detail=true` only when you need the full iteration.
 2. Run `worker_review` for a cheap preliminary pass. Treat its findings as leads with citations, not as a verdict.
-3. Read the change with `worker_result` `diff=true` rather than repeated `git diff` and file reads. Narrow it with `paths` (Git pathspecs, e.g. `[":!tests/"]`) and page with `diff_offset`. Read surrounding source only where the diff or a review finding needs it. `matches_worker_snapshot:false` means the tree changed after the worker.
+3. Read the change with `worker_result` `diff=true` rather than repeated `git diff` and file reads. Use the file list from the summary to select relevant `paths` (Git pathspecs) and page with `diff_offset`; keep the default page budget unless more is needed. Include changed tests in the review. Read surrounding source only where the diff or a review finding needs it. `matches_worker_snapshot:false` means the tree changed after the worker.
 4. Run the acceptance checks yourself, or through `worker_verify` when they work read-only. Report test, build and type-check results separately; a skipped check is not a pass.
 
 For daemons, subprocesses or concurrency, also check startup, shutdown and cancellation, ownership, overlapping calls, lock lifetime and error paths.

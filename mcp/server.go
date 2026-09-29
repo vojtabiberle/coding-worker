@@ -3,6 +3,9 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"os"
+	"strconv"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/vojtabiberle/coding-worker/store"
@@ -24,7 +27,25 @@ type RunID struct {
 	RunID string `json:"run_id"`
 }
 
-func New(a *worker.App) *sdk.Server {
+func New(a *worker.App) (*sdk.Server, error) {
+	waitSeconds := 45
+	if raw, set := os.LookupEnv("CODING_WORKER_WAIT_SECONDS"); set {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > 600 {
+			return nil, fmt.Errorf("CODING_WORKER_WAIT_SECONDS must be an integer between 1 and 600")
+		}
+		waitSeconds = n
+	}
+	waitDescription := fmt.Sprintf("Wait duration in seconds: default %d (omit or use 0), range 1 to 600. Usually omit; override for a deliberately shorter wait. Timeout stops waiting, not the job.", waitSeconds)
+	waitSchema := map[string]any{
+		"type": "object", "required": []string{"run_id"}, "additionalProperties": false,
+		"properties": map[string]any{
+			"run_id":          map[string]any{"type": "string"},
+			"iteration":       map[string]any{"type": "integer", "description": "One-based iteration to wait for. Omit to bind to the latest iteration at call entry. Reuse the returned iteration on subsequent waits."},
+			"timeout_seconds": map[string]any{"type": "integer", "minimum": 0, "maximum": 600, "default": waitSeconds, "description": waitDescription},
+		},
+	}
+
 	s := sdk.NewServer(&sdk.Implementation{Name: "coding-worker", Version: "0.1.0"}, &sdk.ServerOptions{Instructions: "Local coding worker. Execution tools return a run_id at once: worker_wait until done=true (repeat with the returned iteration), then worker_result. New runs need an absolute cwd; explore/diagnose/review follow-ups use run_id and question. Profiles select the backend (Pi by default, or OpenCode); follow-ups keep the saved profile. All operations share a per-worktree lock (busy = wait); different worktrees run concurrently. Investigation tools need Linux/bubblewrap. A timeout stops waiting, not the job: recover known runs before retrying. Completion is not acceptance: review independently and record accepted, changes_requested or rejected with worker_record_review. Never commits or pushes."})
 	sdk.AddTool(s, &sdk.Tool{Name: "worker_implement", Description: "Returns run_id immediately; call worker_wait until done=true, then worker_result. Implement an objective in a Git worktree; writes code and runs checks, never commits. Put known edge cases in acceptance_criteria."}, func(ctx context.Context, _ *sdk.CallToolRequest, in worker.ImplementRequest) (*sdk.CallToolResult, any, error) {
 		if in.Origin == "" {
@@ -61,7 +82,10 @@ func New(a *worker.App) *sdk.Server {
 		v, e := a.Status(ctx, in.RunID)
 		return compactResponse(v, e)
 	})
-	sdk.AddTool(s, &sdk.Tool{Name: "worker_wait", Description: "Block until the iteration finishes or timeout_seconds (default 45, max 600) passes. Use the longest value below your tool timeout: each extra wait is a model turn. Returns state, done and timed_out; no report.", Annotations: &sdk.ToolAnnotations{ReadOnlyHint: true}}, func(ctx context.Context, _ *sdk.CallToolRequest, in worker.WaitRequest) (*sdk.CallToolResult, any, error) {
+	sdk.AddTool(s, &sdk.Tool{Name: "worker_wait", Description: fmt.Sprintf("Block until the iteration finishes or timeout_seconds passes (default %d, max 600). Usually omit timeout_seconds; override for a deliberately shorter wait. Returns state, done and timed_out; no report.", waitSeconds), InputSchema: waitSchema, Annotations: &sdk.ToolAnnotations{ReadOnlyHint: true}}, func(ctx context.Context, _ *sdk.CallToolRequest, in worker.WaitRequest) (*sdk.CallToolResult, any, error) {
+		if in.TimeoutSeconds == 0 {
+			in.TimeoutSeconds = waitSeconds
+		}
 		v, e := a.Wait(ctx, in)
 		return compactResponse(v, e)
 	})
@@ -80,11 +104,15 @@ func New(a *worker.App) *sdk.Server {
 		e := a.Review(in)
 		return response(map[string]bool{"recorded": e == nil}, e)
 	})
-	return s
+	return s, nil
 }
 func Serve(ctx context.Context, a *worker.App) error {
 	defer a.StopJobs()
-	return New(a).Run(ctx, &sdk.StdioTransport{})
+	s, err := New(a)
+	if err != nil {
+		return err
+	}
+	return s.Run(ctx, &sdk.StdioTransport{})
 }
 
 // Text-only JSON avoids duplicating reports in both MCP content channels.

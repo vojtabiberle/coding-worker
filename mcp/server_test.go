@@ -8,18 +8,48 @@ import (
 	"github.com/vojtabiberle/coding-worker/config"
 	"github.com/vojtabiberle/coding-worker/store"
 	"github.com/vojtabiberle/coding-worker/worker"
+	"github.com/vojtabiberle/coding-worker/workspace"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestProtocol(t *testing.T) {
+	for _, seconds := range []string{"", "1", "300", "600"} {
+		t.Run("wait="+seconds, func(t *testing.T) {
+			t.Setenv("CODING_WORKER_WAIT_SECONDS", seconds)
+			if seconds == "" {
+				os.Unsetenv("CODING_WORKER_WAIT_SECONDS")
+			}
+			testProtocol(t, seconds)
+		})
+	}
+}
+
+func TestInvalidWaitDefault(t *testing.T) {
+	for _, value := range []string{"", "0", "-1", "601", "1.5", "no", "99999999999999999999999"} {
+		t.Run(value, func(t *testing.T) {
+			t.Setenv("CODING_WORKER_WAIT_SECONDS", value)
+			if _, err := New(&worker.App{}); err == nil || !strings.Contains(err.Error(), "CODING_WORKER_WAIT_SECONDS") {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func testProtocol(t *testing.T, seconds string) {
 	db, e := store.Open(t.TempDir())
 	if e != nil {
 		t.Fatal(e)
 	}
 	defer db.Close()
 	a := &worker.App{Store: db}
-	s := New(a)
+	s, e := New(a)
+	if e != nil {
+		t.Fatal(e)
+	}
 	serverTransport, clientTransport := sdk.NewInMemoryTransports()
 	ctx := context.Background()
 	ss, e := s.Connect(ctx, serverTransport, nil)
@@ -36,6 +66,69 @@ func TestProtocol(t *testing.T) {
 	list, e := cs.ListTools(ctx, nil)
 	if e != nil || len(list.Tools) != 10 {
 		t.Fatal(list, e)
+	}
+	expected := seconds
+	if expected == "" {
+		expected = "45"
+	}
+	for _, tool := range list.Tools {
+		if tool.Name != "worker_wait" {
+			continue
+		}
+		b, err := json.Marshal(tool.InputSchema)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var schema struct {
+			Properties map[string]struct {
+				Default     int
+				Description string
+			}
+		}
+		if err = json.Unmarshal(b, &schema); err != nil {
+			t.Fatal(err)
+		}
+		prop := schema.Properties["timeout_seconds"]
+		if fmt.Sprint(prop.Default) != expected || !strings.Contains(prop.Description, "default "+expected) || !strings.Contains(tool.Description, "default "+expected) {
+			t.Fatalf("wrong wait default: %s, %s", b, tool.Description)
+		}
+	}
+	for _, value := range []any{-1, 601, 1.5, "300"} {
+		res, err := cs.CallTool(ctx, &sdk.CallToolParams{Name: "worker_wait", Arguments: map[string]any{"run_id": "pending", "timeout_seconds": value}})
+		if err == nil && !res.IsError {
+			t.Fatalf("invalid timeout accepted: %v", value)
+		}
+	}
+	if seconds == "1" {
+		root := t.TempDir()
+		lock, err := workspace.Lock(filepath.Join(db.Dir, "locks"), root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer lock.Close()
+		if err := db.Create(&store.Run{ID: "pending", State: "running", Workspace: workspace.Workspace{Root: root}, Iterations: []store.Iteration{{Number: 1, State: "running"}}}, config.Config{}, true); err != nil {
+			t.Fatal(err)
+		}
+		for _, args := range []map[string]any{{"run_id": "pending"}, {"run_id": "pending", "timeout_seconds": 0}, {"run_id": "pending", "timeout_seconds": 2}} {
+			callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			started := time.Now()
+			res, err := cs.CallTool(callCtx, &sdk.CallToolParams{Name: "worker_wait", Arguments: args})
+			cancel()
+			if err != nil {
+				t.Fatal(err)
+			}
+			var result worker.WaitResult
+			if err := json.Unmarshal([]byte(res.Content[0].(*sdk.TextContent).Text), &result); err != nil || res.IsError || !result.TimedOut || result.Done {
+				t.Fatal(res, result, err)
+			}
+			minimum := time.Second
+			if args["timeout_seconds"] == 2 {
+				minimum = 2 * time.Second
+			}
+			if time.Since(started) < minimum {
+				t.Fatal("returned before requested deadline")
+			}
+		}
 	}
 	v, e := cs.CallTool(ctx, &sdk.CallToolParams{Name: "worker_implement", Arguments: map[string]any{"cwd": "relative", "objective": "test"}})
 	if e != nil || !v.IsError {

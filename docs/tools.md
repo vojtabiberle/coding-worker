@@ -184,7 +184,7 @@ For static diagnosis, source facts may be verified, but `cause_status:supported`
 {"run_id":"RUN_ID","timeout_seconds":45,"iteration":1}
 ```
 
-`worker_wait` waits for one iteration, returning immediately if already finished. Omit `iteration` to select the latest at call entry; repeat subsequent waits with the returned number. `timeout_seconds` defaults to 45 (0 also selects the default); allowed nonzero values are 1–600. Choose the longest duration below the client's tool timeout: every repeated wait is another model turn for the calling agent, which re-reads its whole context.
+`worker_wait` waits for one iteration, returning immediately if already finished. Omit `iteration` to select the latest at call entry; repeat subsequent waits with the returned number. `timeout_seconds` uses the server's configured default when omitted or 0: `CODING_WORKER_WAIT_SECONDS`, or 45 seconds when unset. The effective default appears in the MCP description and schema. Usually omit the parameter; override it for a deliberately shorter wait. Explicit values are 1–600 seconds. Configure the server default below the client's tool timeout (see [MCP setup](setup.md#mcp-setup)). Longer waits reduce repeated calls without delaying completed results.
 
 The compact response contains `run_id`, `iteration`, `latest_iteration`, `state`, `done`, `timed_out`, `phase` and available `last_progress`. `done:true` means execution ended, including failed, cancelled or interrupted states; it does not imply success or acceptance. `timed_out:true` means the wait expired while work was still pending. Repeat the wait without resubmitting work. Cancellation of the waiting request also leaves the job running.
 
